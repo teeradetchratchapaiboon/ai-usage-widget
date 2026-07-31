@@ -415,6 +415,106 @@ impl StorageLayer {
         Ok(result.rows_affected() as u32)
     }
 
+    /// Persist a provider's incremental-collection state (file offsets and
+    /// checkpoint) so a restart resumes instead of re-reading every file.
+    pub async fn save_provider_state(
+        &self,
+        provider_id: &str,
+        state: &crate::provider::ProviderState,
+    ) -> Result<(), StorageError> {
+        let now = Utc::now().to_rfc3339();
+
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            StorageError::QueryFailed(format!("failed to begin state transaction: {}", e))
+        })?;
+
+        for (file_path, offset) in &state.file_positions {
+            sqlx::query(
+                r#"INSERT INTO file_positions (provider_id, file_path, byte_offset, last_read_at)
+                   VALUES (?1, ?2, ?3, ?4)
+                   ON CONFLICT(provider_id, file_path)
+                   DO UPDATE SET byte_offset = excluded.byte_offset,
+                                 last_read_at = excluded.last_read_at"#,
+            )
+            .bind(provider_id)
+            .bind(file_path)
+            .bind(*offset as i64)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                StorageError::QueryFailed(format!("file position upsert failed: {}", e))
+            })?;
+        }
+
+        if let Some(checkpoint) = state.checkpoint {
+            sqlx::query(
+                r#"INSERT INTO collection_checkpoints
+                       (provider_id, last_checkpoint, last_success_at, files_processed)
+                   VALUES (?1, ?2, ?3, ?4)
+                   ON CONFLICT(provider_id)
+                   DO UPDATE SET last_checkpoint = excluded.last_checkpoint,
+                                 last_success_at = excluded.last_success_at,
+                                 files_processed = excluded.files_processed"#,
+            )
+            .bind(provider_id)
+            .bind(checkpoint.to_rfc3339())
+            .bind(&now)
+            .bind(state.file_positions.len() as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| StorageError::QueryFailed(format!("checkpoint upsert failed: {}", e)))?;
+        }
+
+        tx.commit().await.map_err(|e| {
+            StorageError::QueryFailed(format!("failed to commit state transaction: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    /// Load a provider's persisted incremental-collection state.
+    pub async fn load_provider_state(
+        &self,
+        provider_id: &str,
+    ) -> Result<crate::provider::ProviderState, StorageError> {
+        let rows =
+            sqlx::query("SELECT file_path, byte_offset FROM file_positions WHERE provider_id = ?1")
+                .bind(provider_id)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| {
+                    StorageError::QueryFailed(format!("file position query failed: {}", e))
+                })?;
+
+        let mut file_positions = std::collections::HashMap::new();
+        for row in rows {
+            let path: String = row.get("file_path");
+            let offset: i64 = row.get("byte_offset");
+            file_positions.insert(path, offset.max(0) as u64);
+        }
+
+        let checkpoint_row = sqlx::query(
+            "SELECT last_checkpoint FROM collection_checkpoints WHERE provider_id = ?1",
+        )
+        .bind(provider_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| StorageError::QueryFailed(format!("checkpoint query failed: {}", e)))?;
+
+        let checkpoint = checkpoint_row.and_then(|row| {
+            let raw: String = row.get("last_checkpoint");
+            chrono::DateTime::parse_from_rfc3339(&raw)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        });
+
+        Ok(crate::provider::ProviderState {
+            file_positions,
+            checkpoint,
+        })
+    }
+
     /// Get per-provider statistics: today's and this week's tokens.
     pub async fn get_provider_summary(
         &self,

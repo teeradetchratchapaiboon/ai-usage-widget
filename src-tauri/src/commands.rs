@@ -24,6 +24,8 @@ pub struct AppState {
     pub config: Arc<Mutex<AppConfig>>,
     /// Path to the config file on disk for persisting changes.
     pub config_path: PathBuf,
+    /// Window state, so settings changes reach the live widget.
+    pub window_manager: Arc<crate::window::WindowManager>,
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────────
@@ -37,6 +39,12 @@ pub struct ProviderStatusResponse {
     pub last_collection: Option<String>,
     pub events_collected: u64,
     pub errors: Vec<String>,
+    /// Quota consumed, in percent, for providers that publish quota data.
+    pub quota_fast_pct: Option<f64>,
+    pub quota_standard_pct: Option<f64>,
+    pub quota_excess_pct: Option<f64>,
+    /// Tokens reported by the provider itself for today, when available.
+    pub tokens_today: Option<u64>,
 }
 
 /// Result of triggering an immediate collection cycle.
@@ -57,6 +65,9 @@ pub struct AppSettings {
     pub autostart: bool,
     pub always_on_top: bool,
     pub click_through: bool,
+    /// Directory holding the database and config, for display in settings.
+    #[serde(default)]
+    pub data_dir: String,
 }
 
 /// Information about an available update.
@@ -144,10 +155,34 @@ pub async fn get_provider_status(
             last_collection: s.last_activity.map(|dt| dt.to_rfc3339()),
             events_collected: s.tokens_today.unwrap_or(0),
             errors: Vec::new(),
+            quota_fast_pct: s.quota.as_ref().and_then(|q| q.fast_hours_pct),
+            quota_standard_pct: s.quota.as_ref().and_then(|q| q.standard_pct),
+            quota_excess_pct: s.quota.as_ref().and_then(|q| q.excess_pct),
+            tokens_today: s.tokens_today,
         })
         .collect();
 
     Ok(responses)
+}
+
+/// Open (or focus) the dashboard window on the given tab.
+///
+/// Same entry point the tray menu uses, exposed so the widget can offer it too.
+#[cfg(not(test))]
+#[tauri::command]
+pub fn open_dashboard(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
+    let tab = tab.unwrap_or_else(|| "usage".to_string());
+    crate::tray::open_dashboard(&app, &tab);
+    Ok(())
+}
+
+/// Record an uncaught frontend error in the application log.
+///
+/// Release builds have no devtools, so without this a webview exception is
+/// invisible: the window just renders blank.
+#[tauri::command]
+pub fn log_frontend_error(window: String, message: String) {
+    log::error!("[webview:{}] {}", window, message);
 }
 
 /// Trigger an immediate collection cycle.
@@ -202,9 +237,14 @@ pub async fn get_settings(
         locale: config.locale.clone(),
         notification_warning_pct: 75.0,
         notification_critical_pct: 90.0,
-        autostart: false, // Read from registry in full implementation
+        autostart: crate::tray::is_autostart_enabled().unwrap_or(false),
         always_on_top: config.window.always_on_top,
         click_through: config.window.click_through,
+        data_dir: state
+            .config_path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
     })
 }
 
@@ -212,6 +252,7 @@ pub async fn get_settings(
 #[tauri::command]
 pub async fn update_settings(
     settings: PartialSettings,
+    #[cfg_attr(test, allow(unused_variables))] app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // Validate inputs before applying
@@ -235,6 +276,31 @@ pub async fn update_settings(
     }
     if let Some(ct) = settings.click_through {
         config.window.click_through = ct;
+    }
+
+    // Apply window settings to the running widget, not just to the file
+    #[cfg(not(test))]
+    {
+        if let Some(aot) = settings.always_on_top {
+            crate::window::tauri_ops::set_always_on_top(&app, &state.window_manager, aot)?;
+        }
+        if let Some(ct) = settings.click_through {
+            crate::window::tauri_ops::set_click_through(&app, &state.window_manager, ct)?;
+        }
+    }
+
+    // Autostart lives in the Windows registry, not in the config file
+    if let Some(enabled) = settings.autostart {
+        let result = if enabled {
+            std::env::current_exe()
+                .map_err(|e| format!("Cannot resolve executable path: {}", e))
+                .and_then(|exe| {
+                    crate::tray::register_autostart(&exe).map_err(|e| e.to_string())
+                })
+        } else {
+            crate::tray::unregister_autostart().map_err(|e| e.to_string())
+        };
+        result.map_err(|e| format!("Failed to update autostart: {}", e))?;
     }
 
     // Persist to disk
@@ -296,6 +362,16 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let current = semver::Version::parse(current_version)
         .map_err(|e| format!("Failed to parse current version '{}': {}", current_version, e))?;
 
+    // Every outbound request goes through the network guard: only
+    // api.github.com is reachable, provider APIs are blocked outright.
+    const RELEASES_URL: &str = "https://api.github.com/repos/ai-usage-widget/releases/latest";
+    let guard = crate::network::NetworkGuard::new();
+    if !guard.is_allowed(RELEASES_URL) {
+        let audit = guard.audit_blocked_request(RELEASES_URL);
+        log::warn!("Update check blocked by network guard: {:?}", audit);
+        return Err("Update check blocked by network policy".to_string());
+    }
+
     // Query GitHub releases API
     let client = reqwest::Client::builder()
         .user_agent("ai-usage-widget")
@@ -304,7 +380,7 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let response = client
-        .get("https://api.github.com/repos/ai-usage-widget/releases/latest")
+        .get(RELEASES_URL)
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await

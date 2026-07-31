@@ -115,6 +115,23 @@ impl ProviderRegistry {
             })
             .collect()
     }
+
+    /// Export every provider's incremental-collection state, keyed by provider id.
+    pub fn export_states(&self) -> Vec<(String, crate::provider::ProviderState)> {
+        self.adapters
+            .iter()
+            .map(|adapter| (adapter.provider_id().to_string(), adapter.export_state()))
+            .collect()
+    }
+
+    /// Restore a provider's persisted state by id. Unknown ids are ignored.
+    pub fn restore_state(&self, provider_id: &str, state: &crate::provider::ProviderState) {
+        for adapter in &self.adapters {
+            if adapter.provider_id() == provider_id {
+                adapter.restore_state(state);
+            }
+        }
+    }
 }
 
 impl Default for ProviderRegistry {

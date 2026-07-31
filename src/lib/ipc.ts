@@ -49,6 +49,12 @@ export interface ProviderStatus {
   last_collection: string | null;
   events_collected: number;
   errors: string[];
+  /** Quota consumed in percent, for providers that publish quota data */
+  quota_fast_pct: number | null;
+  quota_standard_pct: number | null;
+  quota_excess_pct: number | null;
+  /** Tokens the provider itself reports for today */
+  tokens_today: number | null;
 }
 
 /** Result of triggering an immediate collection cycle */
@@ -67,6 +73,8 @@ export interface AppSettings {
   autostart: boolean;
   always_on_top: boolean;
   click_through: boolean;
+  /** Directory holding the database and config file */
+  data_dir: string;
 }
 
 /** Information about an available update */
@@ -128,4 +136,9 @@ export async function restoreData(path: string): Promise<void> {
 /** Check GitHub API for available updates */
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_for_updates");
+}
+
+/** Open (or focus) the dashboard window on the given tab. */
+export async function openDashboard(tab: "usage" | "settings" = "usage"): Promise<void> {
+  return invoke("open_dashboard", { tab });
 }

@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::dedup::DeduplicationEngine;
+use crate::notify::{NotificationEngine, NotificationEntry};
 use crate::reconcile::ReconciliationEngine;
 use crate::registry::{ProviderCollectionOutcome, ProviderRegistry};
 use crate::storage::StorageLayer;
@@ -36,7 +37,12 @@ pub struct CollectionScheduler {
     consecutive_errors: u32,
     /// Shared stop signal for graceful shutdown.
     is_running: Arc<AtomicBool>,
+    /// Quota threshold tracking (75% / 90% with per-provider cooldowns).
+    notifications: NotificationEngine,
 }
+
+/// Sink invoked when a quota threshold is crossed.
+pub type Notifier = Arc<dyn Fn(&NotificationEntry) + Send + Sync>;
 
 impl CollectionScheduler {
     /// Create a new scheduler with the given default interval (in seconds).
@@ -46,6 +52,7 @@ impl CollectionScheduler {
             default_interval,
             consecutive_errors: 0,
             is_running: Arc::new(AtomicBool::new(false)),
+            notifications: NotificationEngine::new(),
         }
     }
 
@@ -62,6 +69,23 @@ impl CollectionScheduler {
         dedup: Arc<Mutex<DeduplicationEngine>>,
         reconciliation: Arc<ReconciliationEngine>,
         storage: Arc<StorageLayer>,
+    ) {
+        self.run_with_notifier(registry, dedup, reconciliation, storage, None)
+            .await
+    }
+
+    /// Same as [`run`](Self::run), plus quota-threshold notifications.
+    ///
+    /// `notifier` is called for every threshold crossing that is not in
+    /// cooldown; the caller decides how to surface it (Windows toast in the
+    /// app, a recording sink in tests).
+    pub async fn run_with_notifier(
+        &mut self,
+        registry: Arc<ProviderRegistry>,
+        dedup: Arc<Mutex<DeduplicationEngine>>,
+        reconciliation: Arc<ReconciliationEngine>,
+        storage: Arc<StorageLayer>,
+        notifier: Option<Notifier>,
     ) {
         self.is_running.store(true, Ordering::SeqCst);
 
@@ -121,6 +145,44 @@ impl CollectionScheduler {
             } else {
                 0
             };
+
+            // 4b. Persist incremental-collection state so a restart resumes
+            // where this cycle stopped instead of re-reading every file.
+            for (provider_id, state) in registry.export_states() {
+                if state.file_positions.is_empty() && state.checkpoint.is_none() {
+                    continue;
+                }
+                if let Err(e) = storage.save_provider_state(&provider_id, &state).await {
+                    warn!("Failed to persist state for provider '{}': {}", provider_id, e);
+                }
+            }
+
+            // 4c. Quota threshold notifications (75% / 90%, 1h cooldown each)
+            if let Some(ref notify) = notifier {
+                for summary in registry.get_all_summaries() {
+                    let Some(quota) = summary.quota.as_ref() else {
+                        continue;
+                    };
+                    // Use the highest reported quota dimension as the trigger.
+                    let Some(pct) = [quota.fast_hours_pct, quota.standard_pct, quota.excess_pct]
+                        .into_iter()
+                        .flatten()
+                        .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
+                    else {
+                        continue;
+                    };
+
+                    let entries = self.notifications.check_threshold(
+                        &summary.provider_id,
+                        &summary.display_name,
+                        pct,
+                    );
+                    for entry in entries {
+                        info!("Quota notification: {}", entry.message);
+                        notify(&entry);
+                    }
+                }
+            }
 
             // 5. Adjust interval based on outcome
             if all_failed && !any_success {

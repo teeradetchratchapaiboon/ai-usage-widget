@@ -56,6 +56,32 @@ export function formatTokenCount(count: number | null): string {
   return count.toLocaleString("en-US");
 }
 
+/**
+ * Compact token count for tight layouts: 1.2K / 34.5M / 2.1B.
+ * Values below 1,000 are printed as-is. Returns "Not available" for null.
+ */
+export function formatTokenCountCompact(count: number | null): string {
+  if (count === null) {
+    return i18n.t("status.notAvailable");
+  }
+
+  const units: Array<[number, string]> = [
+    [1_000_000_000, "B"],
+    [1_000_000, "M"],
+    [1_000, "K"],
+  ];
+
+  for (const [size, suffix] of units) {
+    if (Math.abs(count) >= size) {
+      const value = count / size;
+      const digits = value >= 100 ? 0 : 1;
+      return `${value.toFixed(digits)}${suffix}`;
+    }
+  }
+
+  return count.toLocaleString("en-US");
+}
+
 // ─── Percentage Formatting ──────────────────────────────────────────────────────
 
 /**

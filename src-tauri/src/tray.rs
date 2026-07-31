@@ -266,6 +266,51 @@ pub fn build_system_tray(
     Ok(tray)
 }
 
+/// Show the dashboard window on the requested tab, creating it on first use.
+///
+/// The tab is delivered as an event; the window is created hidden-then-shown so
+/// the tab is already set when the view first paints.
+#[cfg(not(test))]
+pub fn open_dashboard(app: &tauri::AppHandle, tab: &str) {
+    use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+    if let Some(window) = app.get_webview_window("dashboard") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        // The view is already mounted, so the tab arrives as an event.
+        let _ = window.emit("dashboard-tab", tab.to_string());
+        return;
+    }
+
+    // First open: inject the tab before the app boots. An event would fire
+    // before the webview registered its listener, and a query string on the
+    // asset URL does not resolve to the bundled index.html.
+    let tab_script = format!(
+        "window.__DASHBOARD_TAB__ = {};",
+        serde_json::to_string(tab).unwrap_or_else(|_| "\"usage\"".to_string())
+    );
+
+    match WebviewWindowBuilder::new(app, "dashboard", WebviewUrl::App("index.html".into()))
+        .initialization_script(tab_script)
+        .title("AI Usage Widget — Dashboard")
+        .inner_size(920.0, 620.0)
+        .min_inner_size(720.0, 480.0)
+        .decorations(true)
+        .resizable(true)
+        .build()
+    {
+        Ok(window) => {
+            log::info!(
+                "Dashboard window created (url={:?})",
+                window.url().map(|u| u.to_string())
+            );
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        Err(e) => log::error!("Failed to create dashboard window: {}", e),
+    }
+}
+
 /// Handle tray menu item clicks.
 ///
 /// Dispatched from the tray icon's on_menu_event callback.
@@ -281,15 +326,10 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &str) {
             }
         }
         menu_ids::SHOW_DASHBOARD => {
-            // Toggle dashboard window
-            if let Some(window) = app.get_webview_window("dashboard") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            // If dashboard doesn't exist yet, the frontend/command handler will create it
+            open_dashboard(app, "usage");
         }
         menu_ids::COLLECT_NOW => {
-            // Emit an event that the collection scheduler can listen to
+            // Emit an event that the frontend turns into a trigger_collection call
             let _ = app.emit("collect-now", ());
         }
         menu_ids::LANGUAGE => {
@@ -297,8 +337,8 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &str) {
             let _ = app.emit("toggle-locale", ());
         }
         menu_ids::SETTINGS => {
-            // Emit settings open event
-            let _ = app.emit("open-settings", ());
+            // Settings live in the dashboard window — open it on the settings tab
+            open_dashboard(app, "settings");
         }
         menu_ids::QUIT => {
             app.exit(0);
@@ -355,7 +395,10 @@ mod tests {
         assert_eq!(result, vec![0x00, 0x00]);
     }
 
+    // Writes to the real HKCU\...\Run key of whoever runs the suite, so it is
+    // opt-in: `cargo test -- --ignored autostart`.
     #[test]
+    #[ignore = "mutates the current user's Windows autostart registry key"]
     fn test_autostart_round_trip() {
         // Register autostart with a fake path
         let fake_exe = PathBuf::from(r"C:\Test\AIUsageWidget.exe");

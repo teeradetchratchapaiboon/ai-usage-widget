@@ -128,6 +128,39 @@ pub fn run() {
 
     let registry = Arc::new(registry);
 
+    // Restore persisted file offsets/checkpoints so a restart resumes reading
+    // where the previous run stopped instead of re-parsing every source file.
+    // The logger is only installed once the Tauri builder runs, so startup
+    // findings are collected here and logged from setup().
+    let mut startup_notes: Vec<String> = Vec::new();
+
+    tauri::async_runtime::block_on(async {
+        for provider_id in ["codex", "claude"] {
+            match storage.load_provider_state(provider_id).await {
+                Ok(state) => {
+                    if !state.file_positions.is_empty() || state.checkpoint.is_some() {
+                        startup_notes.push(format!(
+                            "Restored state for '{}': {} file offsets, checkpoint={:?}",
+                            provider_id,
+                            state.file_positions.len(),
+                            state.checkpoint
+                        ));
+                        registry.restore_state(provider_id, &state);
+                    }
+                }
+                Err(e) => {
+                    startup_notes.push(format!("Failed to load state for '{}': {}", provider_id, e))
+                }
+            }
+        }
+    });
+
+    startup_notes.push(format!(
+        "Providers registered: {} (data dir: {})",
+        registry.adapter_count(),
+        data_dir.display()
+    ));
+
     // ─── 5. Create CollectionScheduler ──────────────────────────────────────
     let scheduler = CollectionScheduler::new(config.collection_interval_secs);
     let scheduler = Arc::new(Mutex::new(scheduler));
@@ -146,10 +179,22 @@ pub fn run() {
         scheduler: scheduler.clone(),
         config: Arc::new(Mutex::new(config.clone())),
         config_path: config_path.clone(),
+        window_manager: window_manager.clone(),
     };
 
     // ─── 9. Build and run the Tauri application ─────────────────────────────
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("ai-usage-widget".to_string()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -160,8 +205,20 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Focus existing window when another instance is launched
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second launch acts as a remote control for the running instance:
+            // `ai-usage-widget.exe --dashboard [--settings]` opens the dashboard.
+            if args.iter().any(|a| a == "--dashboard" || a == "--settings") {
+                let tab = if args.iter().any(|a| a == "--settings") {
+                    "settings"
+                } else {
+                    "usage"
+                };
+                tray::open_dashboard(app, tab);
+                return;
+            }
+
+            // Otherwise just bring the widget back
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
                 let _ = window.show();
@@ -169,8 +226,23 @@ pub fn run() {
         }))
         .manage(app_state)
         .setup(move |app| {
+            for note in &startup_notes {
+                log::info!("{}", note);
+            }
+
             // Build system tray with context menu
             let _tray = tray::build_system_tray(app)?;
+
+            // Open the dashboard straight away when asked on the command line
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|a| a == "--dashboard" || a == "--settings") {
+                let tab = if args.iter().any(|a| a == "--settings") {
+                    "settings"
+                } else {
+                    "usage"
+                };
+                tray::open_dashboard(app.handle(), tab);
+            }
 
             // Register click-through recovery shortcut (Win+Shift+U)
             let wm_shortcut = window_manager.clone();
@@ -194,10 +266,37 @@ pub fn run() {
             let reconciliation_clone = reconciliation.clone();
             let storage_clone = storage.clone();
 
+            // Quota thresholds (75% / 90%) surface as Windows toasts.
+            let notify_handle = app.handle().clone();
+            let notifier: crate::scheduler::Notifier = Arc::new(move |entry| {
+                use tauri_plugin_notification::NotificationExt;
+
+                let title = match entry.level {
+                    crate::notify::NotificationLevel::Critical => "AI Usage Widget — Critical",
+                    crate::notify::NotificationLevel::Warning => "AI Usage Widget — Warning",
+                };
+
+                if let Err(e) = notify_handle
+                    .notification()
+                    .builder()
+                    .title(title)
+                    .body(&entry.message)
+                    .show()
+                {
+                    log::warn!("Failed to show quota notification: {}", e);
+                }
+            });
+
             tauri::async_runtime::spawn(async move {
                 let mut sched = scheduler_clone.lock().await;
                 sched
-                    .run(registry_clone, dedup_clone, reconciliation_clone, storage_clone)
+                    .run_with_notifier(
+                        registry_clone,
+                        dedup_clone,
+                        reconciliation_clone,
+                        storage_clone,
+                        Some(notifier),
+                    )
                     .await;
             });
 
@@ -223,6 +322,8 @@ pub fn run() {
             commands::backup_data,
             commands::restore_data,
             commands::check_for_updates,
+            commands::open_dashboard,
+            commands::log_frontend_error,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

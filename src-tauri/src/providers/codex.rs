@@ -456,6 +456,27 @@ impl ProviderAdapter for CodexAdapter {
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
         *self.last_checkpoint.lock().unwrap()
     }
+
+    fn export_state(&self) -> crate::provider::ProviderState {
+        let positions = self.file_positions.lock().unwrap();
+        crate::provider::ProviderState {
+            file_positions: positions
+                .iter()
+                .map(|(path, offset)| (path.to_string_lossy().to_string(), *offset))
+                .collect(),
+            checkpoint: *self.last_checkpoint.lock().unwrap(),
+        }
+    }
+
+    fn restore_state(&self, state: &crate::provider::ProviderState) {
+        let mut positions = self.file_positions.lock().unwrap();
+        for (path, offset) in &state.file_positions {
+            positions.insert(PathBuf::from(path), *offset);
+        }
+        if state.checkpoint.is_some() {
+            *self.last_checkpoint.lock().unwrap() = state.checkpoint;
+        }
+    }
 }
 
 // ─── Helper functions ───────────────────────────────────────────────────────

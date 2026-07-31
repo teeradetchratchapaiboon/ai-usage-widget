@@ -24,7 +24,8 @@
     "day": "วัน",
     "week": "สัปดาห์",
     "month": "เดือน",
-    "custom": "กำหนดเอง"
+    "custom": "กำหนดเอง",
+    "title": "การใช้งาน"
   },
   "granularity": {
     "hourly": "รายชั่วโมง",
@@ -43,7 +44,8 @@
     "fastHours": "ชั่วโมงเร็ว",
     "standard": "มาตรฐาน",
     "excess": "เกินโควตา",
-    "dailyTokens": "Token รายวัน"
+    "dailyTokens": "Token รายวัน",
+    "label": "โควตา"
   },
   "notification": {
     "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",
@@ -58,7 +60,8 @@
     "clickThrough": "คลิกทะลุ",
     "backup": "สำรองข้อมูล",
     "restore": "กู้คืนข้อมูล",
-    "dataDirectory": "โฟลเดอร์ข้อมูล"
+    "dataDirectory": "โฟลเดอร์ข้อมูล",
+    "title": "ตั้งค่า"
   },
   "time": {
     "lastUpdated": "อัปเดตล่าสุด",

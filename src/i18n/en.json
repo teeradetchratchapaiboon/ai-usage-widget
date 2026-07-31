@@ -24,7 +24,8 @@
     "day": "Day",
     "week": "Week",
     "month": "Month",
-    "custom": "Custom"
+    "custom": "Custom",
+    "title": "Usage"
   },
   "granularity": {
     "hourly": "Hourly",
@@ -43,7 +44,8 @@
     "fastHours": "Fast Hours",
     "standard": "Standard",
     "excess": "Excess",
-    "dailyTokens": "Daily Tokens"
+    "dailyTokens": "Daily Tokens",
+    "label": "Quota"
   },
   "notification": {
     "usageWarning": "Usage warning: {{provider}} at {{pct}}%",
@@ -58,7 +60,8 @@
     "clickThrough": "Click-through",
     "backup": "Backup",
     "restore": "Restore",
-    "dataDirectory": "Data Directory"
+    "dataDirectory": "Data Directory",
+    "title": "Settings"
   },
   "time": {
     "lastUpdated": "Last updated",

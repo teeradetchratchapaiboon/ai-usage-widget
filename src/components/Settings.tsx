@@ -268,7 +268,7 @@ export function Settings() {
       {/* Data Directory */}
       <SettingRow label={t("settings.dataDirectory")}>
         <span className="text-xs text-white/50 break-all">
-          %LOCALAPPDATA%\Programs\AIUsageWidget\data
+          {settings.data_dir || "—"}
         </span>
       </SettingRow>
     </div>

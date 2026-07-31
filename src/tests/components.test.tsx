@@ -88,6 +88,10 @@ const fixtureProviders: ProviderStatus[] = [
     last_collection: new Date().toISOString(),
     events_collected: 42,
     errors: [],
+    quota_fast_pct: null,
+    quota_standard_pct: null,
+    quota_excess_pct: null,
+    tokens_today: null,
   },
   {
     provider_id: "claude",
@@ -96,6 +100,10 @@ const fixtureProviders: ProviderStatus[] = [
     last_collection: new Date().toISOString(),
     events_collected: 18,
     errors: [],
+    quota_fast_pct: 82.5,
+    quota_standard_pct: 41.0,
+    quota_excess_pct: null,
+    tokens_today: 29036,
   },
 ];
 
@@ -195,11 +203,10 @@ describe("CompactWidget", () => {
     expect(screen.getByText("Codex Desktop")).toBeTruthy();
     expect(screen.getByText("Claude Desktop")).toBeTruthy();
 
-    // Verify token counts are displayed (formatted with commas)
-    // Multiple elements may show the same value (provider row + meter)
-    const codexTokens = screen.getAllByText("23,000");
+    // Token counts render compact (23,000 -> "23.0K") so they fit 340px
+    const codexTokens = screen.getAllByText("23.0K");
     expect(codexTokens.length).toBeGreaterThanOrEqual(1);
-    const claudeTokens = screen.getAllByText("8,000");
+    const claudeTokens = screen.getAllByText("8.0K");
     expect(claudeTokens.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -280,9 +287,9 @@ describe("Locale switching", () => {
       expect(screen.getByText("Codex Desktop")).toBeTruthy();
     });
 
-    // Thai "Token ทั้งหมด" text should appear (multiple instances expected)
-    const thaiTokenTexts = screen.getAllByText(/Token ทั้งหมด/);
-    expect(thaiTokenTexts.length).toBeGreaterThan(0);
+    // Thai footer label ("อัปเดตล่าสุด") should appear
+    const thaiTexts = screen.getAllByText(/อัปเดตล่าสุด/);
+    expect(thaiTexts.length).toBeGreaterThan(0);
 
     // Switch to English
     await act(async () => {
@@ -298,9 +305,9 @@ describe("Locale switching", () => {
       );
     });
 
-    // English "Total Tokens" text should now appear (multiple instances expected)
-    const enTokenTexts = screen.getAllByText(/Total Tokens/);
-    expect(enTokenTexts.length).toBeGreaterThan(0);
+    // English footer label should now appear instead
+    const enTexts = screen.getAllByText(/Last updated/);
+    expect(enTexts.length).toBeGreaterThan(0);
   });
 });
 

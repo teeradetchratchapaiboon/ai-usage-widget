@@ -72,4 +72,26 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Returns the timestamp of the last successful collection checkpoint.
     fn last_checkpoint(&self) -> Option<DateTime<Utc>>;
+
+    /// Export the adapter's incremental-collection state so it can be persisted.
+    ///
+    /// Adapters that read nothing incrementally keep the default (empty state).
+    fn export_state(&self) -> ProviderState {
+        ProviderState::default()
+    }
+
+    /// Restore previously persisted incremental-collection state.
+    ///
+    /// Called once at startup, before the first collection cycle, so that a
+    /// restart does not re-read every source file from byte 0.
+    fn restore_state(&self, _state: &ProviderState) {}
+}
+
+/// Incremental-collection state of a provider, persisted between runs.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderState {
+    /// Byte offset already consumed, per source file path.
+    pub file_positions: std::collections::HashMap<String, u64>,
+    /// Timestamp of the newest event seen so far.
+    pub checkpoint: Option<DateTime<Utc>>,
 }
