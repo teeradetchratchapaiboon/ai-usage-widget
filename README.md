@@ -47,7 +47,19 @@
 
 ## Screenshots
 
-> _TODO: เพิ่ม screenshots เมื่อ build production version สำเร็จ_
+### Compact Widget (340×200)
+
+![Compact widget](docs/screenshots/widget.png)
+
+แสดง token วันนี้ต่อ provider + แถบโควตา (เฉพาะ provider ที่รายงานโควตามา เช่น Claude) · ปุ่มขวาบนเปิด Dashboard
+
+### Dashboard
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Settings
+
+![Settings](docs/screenshots/settings.png)
 
 ---
 
@@ -548,6 +560,20 @@ ai-usage-widget/
 ---
 
 ## Troubleshooting
+
+### ดู log เมื่อมีปัญหา
+
+Log ของแอปอยู่ที่ `%LOCALAPPDATA%\com.mmiie.ai-usage-widget\logsi-usage-widget.log`
+(รวม error ที่เกิดใน webview ด้วย) — ดูไฟล์นี้ก่อนเสมอเมื่อแอปไม่ทำงานตามคาด
+
+### เปิด Dashboard จาก command line
+
+```
+ai-usage-widget.exe --dashboard     # เปิดแท็บการใช้งาน
+ai-usage-widget.exe --settings      # เปิดแท็บตั้งค่า
+```
+
+ถ้าแอปเปิดอยู่แล้ว คำสั่งจะถูกส่งต่อให้ instance เดิม (single-instance)
 
 ### Widget ไม่แสดง Codex data
 

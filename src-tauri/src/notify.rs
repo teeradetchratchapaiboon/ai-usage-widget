@@ -109,6 +109,13 @@ impl NotificationEngine {
         notifications
     }
 
+    /// Replace the thresholds, keeping existing cooldowns so a threshold
+    /// change does not immediately re-notify providers that already warned.
+    pub fn set_thresholds(&mut self, warning: f64, critical: f64) {
+        self.warning_threshold = warning;
+        self.critical_threshold = critical;
+    }
+
     /// Reset cooldowns for a provider (called when usage resets).
     pub fn reset_provider(&mut self, provider_id: &str) {
         self.cooldowns

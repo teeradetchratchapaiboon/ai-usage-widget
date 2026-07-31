@@ -64,6 +64,9 @@ pub enum ValidationError {
 
     #[error("invalid provider id: {0}")]
     InvalidProviderId(String),
+
+    #[error("invalid notification threshold: {0}")]
+    InvalidThreshold(String),
 }
 
 /// Errors that occur while parsing provider data files.

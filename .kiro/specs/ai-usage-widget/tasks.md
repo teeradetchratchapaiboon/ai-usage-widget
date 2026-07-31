@@ -480,6 +480,30 @@ graph TD
   18 --> 19
 ```
 
+## Post-implementation wiring (2026-07-31)
+
+Tasks above were all marked complete, but several deliverables existed as code
+that nothing ever called. The following were connected and verified against the
+built app afterwards:
+
+- **Startup crash** — `plugins.fs.scope` is not a valid Tauri 2 config key; the
+  app panicked before showing a window. Scopes moved to `capabilities/`.
+- **14.2 / 15.1 / 15.2** — `Dashboard`, `Settings` and `UpdateBanner` were never
+  rendered. The dashboard window now hosts them (tabs + banner).
+- **9.1 / 10.x** — `NotificationEngine` was never constructed; quota thresholds
+  now run in the collection loop and raise Windows toasts.
+- **7.7** — `NetworkGuard` was never called; `check_for_updates` goes through it.
+- **1.3 / 4.2 / 13.6 / 14.4** — `collection_checkpoints` and `file_positions`
+  were created but never read or written; incremental state now survives restart.
+- **8.2** — autostart was a `false` stub; it reads and writes the registry now.
+- **12.1** — trigger_collection collected without storing; it shares the
+  scheduler's dedup → reconcile → store pipeline.
+- **6.3** — quota percentages never reached the UI (`get_provider_status` did not
+  carry them), and `plan-usage-history.json` failed to parse because the `xu`
+  field was required while real samples omit it.
+- **Logging** — no logger was installed, so every `log::*` call in the codebase
+  went nowhere. `tauri-plugin-log` writes to the app log dir.
+
 ## Notes
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP

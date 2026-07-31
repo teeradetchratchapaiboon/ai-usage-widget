@@ -266,8 +266,8 @@ pub async fn get_settings(
     Ok(AppSettings {
         collection_interval_secs: config.collection_interval_secs,
         locale: config.locale.clone(),
-        notification_warning_pct: 75.0,
-        notification_critical_pct: 90.0,
+        notification_warning_pct: config.notification_warning_pct,
+        notification_critical_pct: config.notification_critical_pct,
         autostart: crate::tray::is_autostart_enabled().unwrap_or(false),
         always_on_top: config.window.always_on_top,
         click_through: config.window.click_through,
@@ -307,6 +307,21 @@ pub async fn update_settings(
     }
     if let Some(ct) = settings.click_through {
         config.window.click_through = ct;
+    }
+    if let Some(pct) = settings.notification_warning_pct {
+        config.notification_warning_pct = pct;
+    }
+    if let Some(pct) = settings.notification_critical_pct {
+        config.notification_critical_pct = pct;
+    }
+
+    // Notification thresholds take effect on the running scheduler
+    if settings.notification_warning_pct.is_some() || settings.notification_critical_pct.is_some() {
+        let mut scheduler = state.scheduler.lock().await;
+        scheduler.set_notification_thresholds(
+            config.notification_warning_pct,
+            config.notification_critical_pct,
+        );
     }
 
     // Apply window settings to the running widget, not just to the file

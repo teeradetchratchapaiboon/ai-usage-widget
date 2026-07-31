@@ -29,6 +29,24 @@ pub struct AppConfig {
 
     /// UI locale ("th" or "en").
     pub locale: String,
+
+    /// Quota percentage that triggers a warning notification (default: 75).
+    #[serde(default = "default_warning_pct")]
+    pub notification_warning_pct: f64,
+
+    /// Quota percentage that triggers a critical notification (default: 90).
+    #[serde(default = "default_critical_pct")]
+    pub notification_critical_pct: f64,
+}
+
+/// Default warning threshold for quota notifications.
+fn default_warning_pct() -> f64 {
+    75.0
+}
+
+/// Default critical threshold for quota notifications.
+fn default_critical_pct() -> f64 {
+    90.0
 }
 
 impl Default for AppConfig {
@@ -42,6 +60,8 @@ impl Default for AppConfig {
             collection_interval_secs: 30,
             retention_days: 365,
             locale: "th".to_string(),
+            notification_warning_pct: default_warning_pct(),
+            notification_critical_pct: default_critical_pct(),
         }
     }
 }

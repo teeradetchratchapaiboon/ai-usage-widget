@@ -34,6 +34,8 @@ pub struct PartialSettings {
     pub always_on_top: Option<bool>,
     pub click_through: Option<bool>,
     pub autostart: Option<bool>,
+    pub notification_warning_pct: Option<f64>,
+    pub notification_critical_pct: Option<f64>,
 }
 
 /// Validate a time range for usage history queries.
@@ -110,6 +112,34 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
                 MIN_RETENTION_DAYS,
                 MAX_RETENTION_DAYS,
             ));
+        }
+    }
+
+    // Validate notification thresholds if provided: both must be percentages
+    // and warning must stay below critical.
+    for (label, value) in [
+        ("warning", settings.notification_warning_pct),
+        ("critical", settings.notification_critical_pct),
+    ] {
+        if let Some(pct) = value {
+            if !(0.0..=100.0).contains(&pct) || pct.is_nan() {
+                return Err(ValidationError::InvalidThreshold(format!(
+                    "{} threshold must be between 0 and 100, got {}",
+                    label, pct
+                )));
+            }
+        }
+    }
+
+    if let (Some(warning), Some(critical)) = (
+        settings.notification_warning_pct,
+        settings.notification_critical_pct,
+    ) {
+        if warning >= critical {
+            return Err(ValidationError::InvalidThreshold(format!(
+                "warning threshold ({}) must be below critical threshold ({})",
+                warning, critical
+            )));
         }
     }
 
@@ -251,8 +281,42 @@ mod tests {
             always_on_top: Some(true),
             click_through: Some(false),
             autostart: Some(true),
+            notification_warning_pct: Some(75.0),
+            notification_critical_pct: Some(90.0),
         };
         assert!(validate_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn test_notification_thresholds_out_of_range_rejected() {
+        for pct in [-1.0, 101.0] {
+            let settings = PartialSettings {
+                notification_warning_pct: Some(pct),
+                ..Default::default()
+            };
+            assert!(
+                validate_settings(&settings).is_err(),
+                "{}% should be rejected",
+                pct
+            );
+        }
+    }
+
+    #[test]
+    fn test_warning_threshold_must_stay_below_critical() {
+        let settings = PartialSettings {
+            notification_warning_pct: Some(90.0),
+            notification_critical_pct: Some(75.0),
+            ..Default::default()
+        };
+        assert!(validate_settings(&settings).is_err());
+
+        let ok = PartialSettings {
+            notification_warning_pct: Some(50.0),
+            notification_critical_pct: Some(80.0),
+            ..Default::default()
+        };
+        assert!(validate_settings(&ok).is_ok());
     }
 
     #[test]

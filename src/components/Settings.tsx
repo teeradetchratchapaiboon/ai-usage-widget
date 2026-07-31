@@ -16,6 +16,7 @@ import {
   updateSettings,
   backupData,
   restoreData,
+  triggerCollection,
 } from "../lib/ipc";
 import type { AppSettings } from "../lib/ipc";
 
@@ -28,6 +29,8 @@ export function Settings() {
   const [restorePath, setRestorePath] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCollecting, setIsCollecting] = useState(false);
+  const [collectResult, setCollectResult] = useState<string | null>(null);
 
   // Load settings on mount
   useEffect(() => {
@@ -41,6 +44,22 @@ export function Settings() {
       setError(null);
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function handleCollectNow() {
+    setIsCollecting(true);
+    setCollectResult(null);
+    try {
+      const result = await triggerCollection();
+      setCollectResult(
+        `+${result.events_collected} (${result.providers_collected} provider)`,
+      );
+      setError(result.errors.length > 0 ? result.errors.join("; ") : null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsCollecting(false);
     }
   }
 
@@ -108,6 +127,23 @@ export function Settings() {
           {error}
         </div>
       )}
+
+      {/* Manual collection — same pipeline as the scheduler */}
+      <SettingRow label={t("tray.collectNow")}>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCollectNow}
+            disabled={isCollecting}
+            className="text-xs px-3 py-1 rounded bg-blue-500/80 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+          >
+            {t("tray.collectNow")}
+          </button>
+          {collectResult && (
+            <span className="text-xs text-white/60">{collectResult}</span>
+          )}
+        </div>
+      </SettingRow>
 
       {/* Collection Interval */}
       <SettingRow label={t("settings.collectionInterval")}>

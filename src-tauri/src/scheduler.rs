@@ -219,6 +219,14 @@ impl CollectionScheduler {
         info!("Collection scheduler stopped");
     }
 
+    /// Replace the quota notification thresholds (percent).
+    ///
+    /// Existing cooldowns are kept, so raising a threshold does not immediately
+    /// re-notify for a provider that already warned.
+    pub fn set_notification_thresholds(&mut self, warning: f64, critical: f64) {
+        self.notifications.set_thresholds(warning, critical);
+    }
+
     /// Stop the collection loop gracefully.
     ///
     /// The loop will finish its current sleep cycle and then exit.

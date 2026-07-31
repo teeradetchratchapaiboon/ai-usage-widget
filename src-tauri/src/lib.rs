@@ -162,7 +162,11 @@ pub fn run() {
     ));
 
     // ─── 5. Create CollectionScheduler ──────────────────────────────────────
-    let scheduler = CollectionScheduler::new(config.collection_interval_secs);
+    let mut scheduler = CollectionScheduler::new(config.collection_interval_secs);
+    scheduler.set_notification_thresholds(
+        config.notification_warning_pct,
+        config.notification_critical_pct,
+    );
     let scheduler = Arc::new(Mutex::new(scheduler));
 
     // ─── 6. Create WindowManager ────────────────────────────────────────────

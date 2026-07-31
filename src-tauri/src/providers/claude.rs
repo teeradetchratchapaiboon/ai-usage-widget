@@ -21,21 +21,29 @@ struct PlanUsageHistory {
 struct UsageSample {
     /// Timestamp in milliseconds since epoch.
     t: i64,
-    /// Organization UUID.
-    org: String,
+    /// Organization UUID (absent in some samples).
+    #[serde(default)]
+    org: Option<String>,
     /// Usage percentages.
     u: UsagePercentages,
 }
 
 /// Usage percentage breakdown within a sample.
+///
+/// Every field is optional: real samples omit dimensions that do not apply to
+/// the plan (`xu` is absent on plans without excess usage). Requiring them made
+/// serde reject the whole file, which silently dropped Claude's quota data.
 #[derive(Debug, Deserialize)]
 struct UsagePercentages {
     /// Fast hours usage percentage.
-    fh: f64,
+    #[serde(default)]
+    fh: Option<f64>,
     /// Standard usage percentage.
-    sd: f64,
+    #[serde(default)]
+    sd: Option<f64>,
     /// Excess usage percentage.
-    xu: f64,
+    #[serde(default)]
+    xu: Option<f64>,
 }
 
 /// Parsed structure for buddy-tokens.json.
@@ -128,7 +136,7 @@ impl ClaudeAdapter {
                 ))
             })?;
 
-            let session_hash = Self::hash_org_id(&sample.org);
+            let session_hash = Self::hash_org_id(sample.org.as_deref().unwrap_or("unknown"));
 
             let event = RawUsageEvent {
                 provider_id: "claude".to_string(),
@@ -138,9 +146,9 @@ impl ClaudeAdapter {
                 tokens: TokenUsage::default(),
                 context_window: None,
                 quota: Some(QuotaUsage {
-                    fast_hours_pct: Some(sample.u.fh),
-                    standard_pct: Some(sample.u.sd),
-                    excess_pct: Some(sample.u.xu),
+                    fast_hours_pct: sample.u.fh,
+                    standard_pct: sample.u.sd,
+                    excess_pct: sample.u.xu,
                     daily_tokens: None,
                 }),
                 session_hash: Some(session_hash),
@@ -322,9 +330,9 @@ impl ProviderAdapter for ClaudeAdapter {
                     if history.version == 2 {
                         if let Some(latest) = history.samples.last() {
                             quota = Some(QuotaUsage {
-                                fast_hours_pct: Some(latest.u.fh),
-                                standard_pct: Some(latest.u.sd),
-                                excess_pct: Some(latest.u.xu),
+                                fast_hours_pct: latest.u.fh,
+                                standard_pct: latest.u.sd,
+                                excess_pct: latest.u.xu,
                                 daily_tokens: None,
                             });
                         }
@@ -547,6 +555,23 @@ mod tests {
 
     fn create_test_dir() -> TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn test_parses_samples_without_excess_field() {
+        // Real plan-usage-history.json samples carry only fh/sd; requiring xu
+        // made serde reject the file and silently dropped all quota data.
+        let dir = tempfile::tempdir().unwrap();
+        let json = r#"{"version":2,"samples":[{"t":1785515157692,"org":"abc","u":{"fh":60,"sd":82}}]}"#;
+        fs::write(dir.path().join("plan-usage-history.json"), json).unwrap();
+
+        let adapter = ClaudeAdapter::new(dir.path().to_path_buf());
+        let summary = adapter.get_current_summary().unwrap();
+        let quota = summary.quota.expect("quota should be parsed");
+
+        assert_eq!(quota.fast_hours_pct, Some(60.0));
+        assert_eq!(quota.standard_pct, Some(82.0));
+        assert_eq!(quota.excess_pct, None);
     }
 
     #[test]
