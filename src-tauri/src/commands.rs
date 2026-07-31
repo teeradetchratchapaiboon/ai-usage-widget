@@ -26,6 +26,10 @@ pub struct AppState {
     pub config_path: PathBuf,
     /// Window state, so settings changes reach the live widget.
     pub window_manager: Arc<crate::window::WindowManager>,
+    /// Dedup/reconcile engines, so manual collection stores through the same
+    /// pipeline the scheduler uses.
+    pub dedup: Arc<Mutex<crate::dedup::DeduplicationEngine>>,
+    pub reconciliation: Arc<crate::reconcile::ReconciliationEngine>,
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────────
@@ -192,29 +196,56 @@ pub async fn trigger_collection(
 ) -> Result<CollectionResponse, String> {
     let outcomes = state.registry.collect_all();
 
-    let mut events_collected: u32 = 0;
+    let mut all_events = Vec::new();
     let mut providers_collected: u32 = 0;
     let mut errors: Vec<String> = Vec::new();
 
     for outcome in outcomes {
         match outcome {
             crate::registry::ProviderCollectionOutcome::Success { provider_id, result } => {
-                events_collected += result.events.len() as u32;
                 providers_collected += 1;
-                // Store events
-                if !result.events.is_empty() {
-                    // Note: Full dedup/reconcile pipeline would be invoked here.
-                    // For now, we report what was collected.
-                    log::info!(
-                        "Trigger collection: provider '{}' returned {} events",
-                        provider_id,
-                        result.events.len()
-                    );
-                }
+                log::info!(
+                    "Trigger collection: provider '{}' returned {} events",
+                    provider_id,
+                    result.events.len()
+                );
+                all_events.extend(result.events);
             }
             crate::registry::ProviderCollectionOutcome::Failed { provider_id, error } => {
                 errors.push(format!("Provider '{}': {}", provider_id, error));
             }
+        }
+    }
+
+    // Store through the same dedup -> reconcile -> store pipeline as the
+    // scheduler, so "Collect Now" actually persists what it collected.
+    let events_collected = if all_events.is_empty() {
+        0
+    } else {
+        match crate::scheduler::process_events(
+            all_events,
+            &state.dedup,
+            &state.reconciliation,
+            &state.storage,
+        )
+        .await
+        {
+            Ok(stored) => stored as u32,
+            Err(e) => {
+                errors.push(format!("Failed to store collected events: {}", e));
+                0
+            }
+        }
+    };
+
+    // Persist the advanced file offsets too
+    for (provider_id, provider_state) in state.registry.export_states() {
+        if let Err(e) = state
+            .storage
+            .save_provider_state(&provider_id, &provider_state)
+            .await
+        {
+            log::warn!("Failed to persist state for '{}': {}", provider_id, e);
         }
     }
 

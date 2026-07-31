@@ -180,6 +180,8 @@ pub fn run() {
         config: Arc::new(Mutex::new(config.clone())),
         config_path: config_path.clone(),
         window_manager: window_manager.clone(),
+        dedup: dedup.clone(),
+        reconciliation: reconciliation.clone(),
     };
 
     // ─── 9. Build and run the Tauri application ─────────────────────────────

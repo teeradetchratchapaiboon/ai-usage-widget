@@ -258,6 +258,20 @@ impl CollectionScheduler {
         reconciliation: &Arc<ReconciliationEngine>,
         storage: &Arc<StorageLayer>,
     ) -> Result<usize, String> {
+        process_events(events, dedup, reconciliation, storage).await
+    }
+}
+
+/// Run collected events through dedup -> reconcile -> store.
+///
+/// Shared by the scheduler loop and the manual "Collect Now" command so both
+/// paths persist what they collect.
+pub async fn process_events(
+    events: Vec<crate::types::RawUsageEvent>,
+    dedup: &Arc<Mutex<DeduplicationEngine>>,
+    reconciliation: &Arc<ReconciliationEngine>,
+    storage: &Arc<StorageLayer>,
+) -> Result<usize, String> {
         // Phase 1: Deduplicate
         let unique_events = {
             let dedup_guard = dedup.lock().await;
@@ -293,9 +307,8 @@ impl CollectionScheduler {
                 .map_err(|e| format!("mark_seen failed: {}", e))?;
         }
 
-        info!("Stored {} new events after deduplication", new_count);
-        Ok(new_count)
-    }
+    info!("Stored {} new events after deduplication", new_count);
+    Ok(new_count)
 }
 
 #[cfg(test)]
