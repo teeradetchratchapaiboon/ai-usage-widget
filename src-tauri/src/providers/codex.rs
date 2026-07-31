@@ -22,6 +22,8 @@ pub struct CodexAdapter {
     state_db_path: PathBuf,
     file_positions: Mutex<HashMap<PathBuf, u64>>,
     last_checkpoint: Mutex<Option<DateTime<Utc>>>,
+    /// Newest rate limit values seen while parsing session logs.
+    rate_limits: Mutex<RateLimitSnapshot>,
 }
 
 // ─── JSONL deserialization structures ───────────────────────────────────────
@@ -47,6 +49,47 @@ struct TokenCountPayload {
     #[serde(rename = "type")]
     payload_type: Option<String>,
     info: Option<TokenCountInfo>,
+    /// Plan rate limits reported next to the token counts.
+    #[serde(default)]
+    rate_limits: Option<RateLimits>,
+}
+
+/// Rate limit block from a `token_count` event.
+///
+/// Codex interleaves several limit families (`codex`, `premium`, ...) and only
+/// fills `primary`/`secondary` for the one that applies, so both windows are
+/// optional and the newest non-null value wins.
+#[derive(Debug, Deserialize)]
+struct RateLimits {
+    #[serde(default)]
+    primary: Option<RateLimitWindow>,
+    #[serde(default)]
+    secondary: Option<RateLimitWindow>,
+}
+
+/// One rate limit window (percentage consumed plus when it resets).
+#[derive(Debug, Clone, Deserialize)]
+struct RateLimitWindow {
+    #[serde(default)]
+    used_percent: Option<f64>,
+    #[serde(default)]
+    window_minutes: Option<u64>,
+    /// Unix timestamp (seconds) at which the window resets.
+    #[serde(default)]
+    resets_at: Option<i64>,
+}
+
+/// Latest rate limit snapshot kept for the widget summary.
+///
+/// Serialized into the provider's persisted state: the values only appear
+/// while parsing new log lines, so without persistence a restart would show no
+/// quota until the next Codex session writes to disk.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RateLimitSnapshot {
+    pub primary_used_pct: Option<f64>,
+    pub secondary_used_pct: Option<f64>,
+    pub resets_at: Option<DateTime<Utc>>,
+    pub window_minutes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +141,7 @@ impl CodexAdapter {
             state_db_path: config.state_db_path.clone(),
             file_positions: Mutex::new(HashMap::new()),
             last_checkpoint: Mutex::new(None),
+            rate_limits: Mutex::new(RateLimitSnapshot::default()),
         }
     }
 
@@ -143,6 +187,89 @@ impl CodexAdapter {
             }
         }
         files
+    }
+
+    /// Fill the rate limit snapshot from the newest session log when it is
+    /// still empty.
+    ///
+    /// Rate limits only appear while parsing new lines, so after a restart with
+    /// restored offsets (and no persisted snapshot) the widget would show no
+    /// Codex quota until the next Codex session writes to disk. This reads only
+    /// the tail of the newest file and emits no events.
+    fn prime_rate_limits(&self) {
+        const TAIL_BYTES: u64 = 256 * 1024;
+
+        {
+            let snapshot = self.rate_limits.lock().unwrap();
+            if snapshot.primary_used_pct.is_some() || snapshot.secondary_used_pct.is_some() {
+                return;
+            }
+        }
+
+        let newest = self
+            .discover_jsonl_files()
+            .into_iter()
+            .filter_map(|path| {
+                let modified = fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+                Some((modified, path))
+            })
+            .max_by_key(|(modified, _)| *modified)
+            .map(|(_, path)| path);
+
+        let Some(path) = newest else {
+            return;
+        };
+
+        let Ok(file_size) = fs::metadata(&path).map(|m| m.len()) else {
+            return;
+        };
+
+        let Ok(mut file) = fs::File::open(&path) else {
+            return;
+        };
+        if file
+            .seek(SeekFrom::Start(file_size.saturating_sub(TAIL_BYTES)))
+            .is_err()
+        {
+            return;
+        }
+
+        let mut found = RateLimitSnapshot::default();
+        for line in BufReader::new(&mut file).lines().map_while(Result::ok) {
+            let Ok(parsed) = serde_json::from_str::<JsonlLine>(&line) else {
+                continue;
+            };
+            let Some(JsonlPayload::TokenCount(tc)) = parsed.payload else {
+                continue;
+            };
+            let Some(limits) = tc.rate_limits else {
+                continue;
+            };
+
+            if let Some(primary) = limits.primary.as_ref() {
+                if let Some(pct) = primary.used_percent {
+                    found.primary_used_pct = Some(pct);
+                    found.window_minutes = primary.window_minutes;
+                    found.resets_at = primary
+                        .resets_at
+                        .and_then(|ts| DateTime::from_timestamp(ts, 0));
+                }
+            }
+            if let Some(secondary) = limits.secondary.as_ref() {
+                if let Some(pct) = secondary.used_percent {
+                    found.secondary_used_pct = Some(pct);
+                }
+            }
+        }
+
+        if found.primary_used_pct.is_some() || found.secondary_used_pct.is_some() {
+            log::info!(
+                "Primed Codex rate limits from {}: primary={:?}%",
+                path.display(),
+                found.primary_used_pct
+            );
+            *self.rate_limits.lock().unwrap() = found;
+        }
     }
 
     /// Read a JSONL file incrementally from the stored byte offset.
@@ -229,6 +356,27 @@ impl CodexAdapter {
                     if t == "event_msg"
                         && tc.payload_type.as_deref() == Some("token_count") =>
                 {
+                    // Remember the newest rate limit values. Codex reports
+                    // several limit families and nulls the windows that do not
+                    // apply, so only non-null windows update the snapshot.
+                    if let Some(ref limits) = tc.rate_limits {
+                        let mut snapshot = self.rate_limits.lock().unwrap();
+                        if let Some(primary) = limits.primary.as_ref() {
+                            if let Some(pct) = primary.used_percent {
+                                snapshot.primary_used_pct = Some(pct);
+                                snapshot.window_minutes = primary.window_minutes;
+                                snapshot.resets_at = primary
+                                    .resets_at
+                                    .and_then(|ts| DateTime::from_timestamp(ts, 0));
+                            }
+                        }
+                        if let Some(secondary) = limits.secondary.as_ref() {
+                            if let Some(pct) = secondary.used_percent {
+                                snapshot.secondary_used_pct = Some(pct);
+                            }
+                        }
+                    }
+
                     if let Some(ref info) = tc.info {
                         // Prefer last_token_usage for per-event granularity
                         let usage_data = info
@@ -250,7 +398,21 @@ impl CodexAdapter {
                                     total_tokens: data.total_tokens,
                                 },
                                 context_window: info.model_context_window,
-                                quota: None,
+                                quota: {
+                                    let snapshot = self.rate_limits.lock().unwrap();
+                                    if snapshot.primary_used_pct.is_some()
+                                        || snapshot.secondary_used_pct.is_some()
+                                    {
+                                        Some(crate::types::QuotaUsage {
+                                            fast_hours_pct: snapshot.primary_used_pct,
+                                            standard_pct: snapshot.secondary_used_pct,
+                                            excess_pct: None,
+                                            daily_tokens: None,
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                },
                                 session_hash: Some(session_hash.clone()),
                                 project_hash: project_hash.clone(),
                                 source_file: Some(
@@ -390,6 +552,10 @@ impl ProviderAdapter for CodexAdapter {
     }
 
     fn collect(&self, _since: Option<DateTime<Utc>>) -> Result<CollectionResult, CollectionError> {
+        // Quota is only present in newly parsed lines; make sure a restart with
+        // nothing new to read still knows the current limit.
+        self.prime_rate_limits();
+
         let mut all_events = Vec::new();
         let mut files_read: u32 = 0;
         let mut bytes_processed: u64 = 0;
@@ -441,16 +607,34 @@ impl ProviderAdapter for CodexAdapter {
     }
 
     fn get_current_summary(&self) -> Result<ProviderSummary, CollectionError> {
+        let snapshot = self.rate_limits.lock().unwrap().clone();
+        let quota = if snapshot.primary_used_pct.is_some() || snapshot.secondary_used_pct.is_some()
+        {
+            Some(crate::types::QuotaUsage {
+                fast_hours_pct: snapshot.primary_used_pct,
+                standard_pct: snapshot.secondary_used_pct,
+                excess_pct: None,
+                daily_tokens: None,
+            })
+        } else {
+            None
+        };
+
         Ok(ProviderSummary {
             provider_id: "codex".to_string(),
             display_name: "Codex Desktop".to_string(),
             is_available: self.is_available(),
             current_model: None,
             tokens_today: None,
-            quota: None,
+            quota,
             context_window: None,
             last_activity: *self.last_checkpoint.lock().unwrap(),
+            quota_resets_at: snapshot.resets_at,
         })
+    }
+
+    fn quota_resets_at(&self) -> Option<DateTime<Utc>> {
+        self.rate_limits.lock().unwrap().resets_at
     }
 
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
@@ -459,12 +643,21 @@ impl ProviderAdapter for CodexAdapter {
 
     fn export_state(&self) -> crate::provider::ProviderState {
         let positions = self.file_positions.lock().unwrap();
+        let snapshot = self.rate_limits.lock().unwrap().clone();
+
         crate::provider::ProviderState {
             file_positions: positions
                 .iter()
                 .map(|(path, offset)| (path.to_string_lossy().to_string(), *offset))
                 .collect(),
             checkpoint: *self.last_checkpoint.lock().unwrap(),
+            metadata: if snapshot.primary_used_pct.is_some()
+                || snapshot.secondary_used_pct.is_some()
+            {
+                serde_json::to_string(&snapshot).ok()
+            } else {
+                None
+            },
         }
     }
 
@@ -475,6 +668,12 @@ impl ProviderAdapter for CodexAdapter {
         }
         if state.checkpoint.is_some() {
             *self.last_checkpoint.lock().unwrap() = state.checkpoint;
+        }
+        if let Some(raw) = state.metadata.as_deref() {
+            match serde_json::from_str::<RateLimitSnapshot>(raw) {
+                Ok(snapshot) => *self.rate_limits.lock().unwrap() = snapshot,
+                Err(e) => log::warn!("Ignoring unreadable codex state metadata: {}", e),
+            }
         }
     }
 }
@@ -546,6 +745,116 @@ fn read_thread_rows(
     Ok(result)
 }
 
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_parses_rate_limits_from_token_count() {
+        // Codex reports plan limits next to the token counts; a full weekly
+        // window shows up as primary.used_percent = 100.
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026").join("07").join("30");
+        fs::create_dir_all(&day).unwrap();
+
+        let line = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"model_context_window":258400},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677},"secondary":{"used_percent":42.5}}}}"#;
+        fs::write(day.join("rollout-test.jsonl"), format!("{}
+", line)).unwrap();
+
+        let config = CodexConfig {
+            sessions_dir: dir.path().to_path_buf(),
+            state_db_path: dir.path().join("missing.sqlite"),
+            enabled: true,
+        };
+        let adapter = CodexAdapter::new(&config);
+        let result = adapter.collect(None).unwrap();
+
+        let quota = result.events[0]
+            .quota
+            .as_ref()
+            .expect("event should carry the quota");
+        assert_eq!(quota.fast_hours_pct, Some(100.0));
+        assert_eq!(quota.standard_pct, Some(42.5));
+
+        let summary = adapter.get_current_summary().unwrap();
+        let summary_quota = summary.quota.expect("summary should carry the quota");
+        assert_eq!(summary_quota.fast_hours_pct, Some(100.0));
+        assert_eq!(
+            adapter.quota_resets_at().map(|dt| dt.timestamp()),
+            Some(1785922677)
+        );
+    }
+
+    #[test]
+    fn test_null_rate_limit_windows_keep_previous_values() {
+        // Later lines carry a different limit family with null windows; they
+        // must not wipe the values already seen.
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026").join("07").join("30");
+        fs::create_dir_all(&day).unwrap();
+
+        let with_limits = r#"{"timestamp":"2026-07-30T20:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677},"secondary":null}}}"#;
+        let without = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"premium","primary":null,"secondary":null}}}"#;
+        fs::write(
+            day.join("rollout-test.jsonl"),
+            format!("{}
+{}
+", with_limits, without),
+        )
+        .unwrap();
+
+        let config = CodexConfig {
+            sessions_dir: dir.path().to_path_buf(),
+            state_db_path: dir.path().join("missing.sqlite"),
+            enabled: true,
+        };
+        let adapter = CodexAdapter::new(&config);
+        adapter.collect(None).unwrap();
+
+        let summary = adapter.get_current_summary().unwrap();
+        assert_eq!(
+            summary.quota.and_then(|q| q.fast_hours_pct),
+            Some(100.0),
+            "a null window must not erase the last known percentage"
+        );
+    }
+
+    #[test]
+    fn test_rate_limit_snapshot_survives_restart() {
+        // Offsets are restored on startup, so no new lines are parsed and the
+        // in-memory snapshot would be empty without persisting it.
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026").join("07").join("30");
+        fs::create_dir_all(&day).unwrap();
+        let line = r#"{"timestamp":"2026-07-30T20:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677}}}}"#;
+        fs::write(day.join("rollout-test.jsonl"), format!("{}
+", line)).unwrap();
+
+        let config = CodexConfig {
+            sessions_dir: dir.path().to_path_buf(),
+            state_db_path: dir.path().join("missing.sqlite"),
+            enabled: true,
+        };
+
+        let first = CodexAdapter::new(&config);
+        first.collect(None).unwrap();
+        let state = first.export_state();
+        assert!(state.metadata.is_some(), "quota should be exported");
+
+        // A fresh adapter that only restores state (no re-read) still reports it
+        let restarted = CodexAdapter::new(&config);
+        restarted.restore_state(&state);
+
+        let summary = restarted.get_current_summary().unwrap();
+        assert_eq!(summary.quota.and_then(|q| q.fast_hours_pct), Some(100.0));
+        assert_eq!(
+            restarted.quota_resets_at().map(|dt| dt.timestamp()),
+            Some(1785922677)
+        );
+    }
+}
 
 #[cfg(test)]
 mod prop_tests_jsonl_reader {

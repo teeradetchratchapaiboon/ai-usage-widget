@@ -49,6 +49,8 @@ pub struct ProviderStatusResponse {
     pub quota_excess_pct: Option<f64>,
     /// Tokens reported by the provider itself for today, when available.
     pub tokens_today: Option<u64>,
+    /// When the quota window resets (RFC 3339), for providers that publish one.
+    pub quota_resets_at: Option<String>,
 }
 
 /// Result of triggering an immediate collection cycle.
@@ -163,6 +165,7 @@ pub async fn get_provider_status(
             quota_standard_pct: s.quota.as_ref().and_then(|q| q.standard_pct),
             quota_excess_pct: s.quota.as_ref().and_then(|q| q.excess_pct),
             tokens_today: s.tokens_today,
+            quota_resets_at: s.quota_resets_at.map(|dt| dt.to_rfc3339()),
         })
         .collect();
 

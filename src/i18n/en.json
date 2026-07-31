@@ -45,7 +45,9 @@
     "standard": "Standard",
     "excess": "Excess",
     "dailyTokens": "Daily Tokens",
-    "label": "Quota"
+    "label": "Quota",
+    "used": "Quota used",
+    "resetsAt": "Resets"
   },
   "notification": {
     "usageWarning": "Usage warning: {{provider}} at {{pct}}%",

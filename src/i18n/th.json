@@ -45,7 +45,9 @@
     "standard": "มาตรฐาน",
     "excess": "เกินโควตา",
     "dailyTokens": "Token รายวัน",
-    "label": "โควตา"
+    "label": "โควตา",
+    "used": "โควตาที่ใช้",
+    "resetsAt": "รีเซ็ต"
   },
   "notification": {
     "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",

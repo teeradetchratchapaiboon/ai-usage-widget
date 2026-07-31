@@ -360,6 +360,7 @@ impl ProviderAdapter for ClaudeAdapter {
             quota,
             context_window: None,
             last_activity: None,
+            quota_resets_at: None,
         })
     }
 

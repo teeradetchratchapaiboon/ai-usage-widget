@@ -124,3 +124,25 @@ export function formatBangkokTime(isoTimestamp: string | null): string {
     hour12: false,
   }).format(date);
 }
+
+/**
+ * Format when a quota window resets, as local date + time.
+ * Returns "Not available" for null/unparseable values.
+ */
+export function formatResetTime(iso: string | null): string {
+  if (!iso) {
+    return i18n.t("status.notAvailable");
+  }
+
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return i18n.t("status.notAvailable");
+  }
+
+  return date.toLocaleString(i18n.language === "th" ? "th-TH" : "en-US", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

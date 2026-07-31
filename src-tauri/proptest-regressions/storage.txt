@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2847cae2925d48502d8d08d2d0fa19433b4e25eda539c698853bc1b4715342cb # shrinks to events = [ReconciledEvent { id: 0f004142-2359-4730-934e-0d97b7ba0531, fingerprint: EventFingerprint([0, 0, 0, 0, 0, 0, 168, 50, 108, 208, 38, 222, 103, 77, 23, 127, 93, 60, 144, 205, 57, 230, 49, 37, 227, 167, 122, 46, 51, 149, 139, 187]), provider_id: "claude", event_type: QuotaSample, timestamp: 2026-07-31T16:48:47Z, model: Some("test-model"), tokens: TokenUsage { input_tokens: Some(71472), cached_input_tokens: None, output_tokens: Some(48673), reasoning_tokens: None, total_tokens: Some(120145) }, context_window: None, quota: None, session_hash: None, project_hash: None, reconciled_at: 2026-07-31T17:01:25.753530Z, source_count: 1 }]
+cc 493d92e2980305e6bc2f15bb6623d4270a9797ab32e12d7824948ae0d3640b74 # shrinks to events = [ReconciledEvent { id: 7bca0621-c394-4f9f-80d1-469734d19cdb, fingerprint: EventFingerprint([0, 0, 0, 0, 218, 106, 121, 85, 184, 34, 41, 19, 131, 203, 187, 141, 227, 110, 130, 78, 80, 8, 243, 89, 38, 190, 83, 201, 11, 137, 143, 58]), provider_id: "claude", event_type: DailyAggregate, timestamp: 2026-07-31T15:59:10Z, model: Some("test-model"), tokens: TokenUsage { input_tokens: Some(40598), cached_input_tokens: None, output_tokens: Some(45915), reasoning_tokens: None, total_tokens: Some(86513) }, context_window: None, quota: None, session_hash: None, project_hash: None, reconciled_at: 2026-07-31T17:01:25.829634500Z, source_count: 1 }]

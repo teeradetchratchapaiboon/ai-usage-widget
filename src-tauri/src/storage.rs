@@ -450,17 +450,19 @@ impl StorageLayer {
         if let Some(checkpoint) = state.checkpoint {
             sqlx::query(
                 r#"INSERT INTO collection_checkpoints
-                       (provider_id, last_checkpoint, last_success_at, files_processed)
-                   VALUES (?1, ?2, ?3, ?4)
+                       (provider_id, last_checkpoint, last_success_at, files_processed, metadata)
+                   VALUES (?1, ?2, ?3, ?4, ?5)
                    ON CONFLICT(provider_id)
                    DO UPDATE SET last_checkpoint = excluded.last_checkpoint,
                                  last_success_at = excluded.last_success_at,
-                                 files_processed = excluded.files_processed"#,
+                                 files_processed = excluded.files_processed,
+                                 metadata = COALESCE(excluded.metadata, collection_checkpoints.metadata)"#,
             )
             .bind(provider_id)
             .bind(checkpoint.to_rfc3339())
             .bind(&now)
             .bind(state.file_positions.len() as i64)
+            .bind(state.metadata.as_deref())
             .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::QueryFailed(format!("checkpoint upsert failed: {}", e)))?;
@@ -495,23 +497,29 @@ impl StorageLayer {
         }
 
         let checkpoint_row = sqlx::query(
-            "SELECT last_checkpoint FROM collection_checkpoints WHERE provider_id = ?1",
+            "SELECT last_checkpoint, metadata FROM collection_checkpoints WHERE provider_id = ?1",
         )
         .bind(provider_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| StorageError::QueryFailed(format!("checkpoint query failed: {}", e)))?;
 
-        let checkpoint = checkpoint_row.and_then(|row| {
-            let raw: String = row.get("last_checkpoint");
-            chrono::DateTime::parse_from_rfc3339(&raw)
-                .ok()
-                .map(|dt| dt.with_timezone(&Utc))
-        });
+        let (checkpoint, metadata) = match checkpoint_row {
+            Some(row) => {
+                let raw: String = row.get("last_checkpoint");
+                let checkpoint = chrono::DateTime::parse_from_rfc3339(&raw)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&Utc));
+                let metadata: Option<String> = row.get("metadata");
+                (checkpoint, metadata)
+            }
+            None => (None, None),
+        };
 
         Ok(crate::provider::ProviderState {
             file_positions,
             checkpoint,
+            metadata,
         })
     }
 
@@ -2098,9 +2106,19 @@ mod prop_tests_aggregation {
     /// Generate multiple events for today, distributed across providers.
     fn arb_today_events(count: usize) -> impl Strategy<Value = Vec<ReconciledEvent>> {
         let now = Utc::now();
-        // Use events from the last 2 hours to ensure they're within "today"
-        let min_ts = (now - Duration::hours(2)).timestamp();
-        let max_ts = now.timestamp();
+
+        // "Today" is the local day (see current_period_starts), so the window
+        // is clamped to local midnight — otherwise a run just after midnight
+        // generates events that belong to yesterday and the sums disagree.
+        let local_midnight = Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .and_then(|naive| Local.from_local_datetime(&naive).earliest())
+            .map(|dt| dt.with_timezone(&Utc).timestamp())
+            .unwrap_or_else(|| (now - Duration::days(1)).timestamp());
+
+        let min_ts = (now - Duration::hours(2)).timestamp().max(local_midnight);
+        let max_ts = now.timestamp().max(min_ts + 1);
 
         proptest::collection::vec(
             (min_ts..max_ts, arb_provider_id()).prop_flat_map(|(ts, provider)| {

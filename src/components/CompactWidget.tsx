@@ -8,7 +8,11 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
-import { formatTokenCountCompact, formatRelative } from "../lib/format";
+import {
+  formatTokenCountCompact,
+  formatRelative,
+  formatResetTime,
+} from "../lib/format";
 import { openDashboard } from "../lib/ipc";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
@@ -103,6 +107,7 @@ export function CompactWidget() {
               totalTokensToday={providerUsage?.total_tokens_today ?? null}
               lastActivity={providerUsage?.last_activity ?? null}
               quotaPct={highestQuota(provider)}
+              quotaResetsAt={provider.quota_resets_at}
             />
           );
         })}
@@ -136,6 +141,8 @@ interface ProviderRowProps {
   lastActivity: string | null;
   /** Highest quota dimension the provider reports, in percent. */
   quotaPct: number | null;
+  /** When that quota window resets (RFC 3339), if published. */
+  quotaResetsAt: string | null;
 }
 
 function ProviderRow({
@@ -145,6 +152,7 @@ function ProviderRow({
   totalTokensToday,
   lastActivity,
   quotaPct,
+  quotaResetsAt,
 }: ProviderRowProps) {
   const { t } = useTranslation();
 
@@ -179,10 +187,15 @@ function ProviderRow({
           for token counts the number above already says everything. */}
       {quotaPct !== null && (
         <ProviderMeter
-          label={t("quota.label")}
+          label={t("quota.used")}
           percentage={quotaPct}
           valueText={`${quotaPct.toFixed(0)}%`}
         />
+      )}
+      {quotaPct !== null && quotaPct >= 100 && quotaResetsAt && (
+        <span className="text-[9px] text-red-300/80 pl-4 truncate">
+          {t("quota.resetsAt")}: {formatResetTime(quotaResetsAt)}
+        </span>
       )}
       {lastActivity && (
         <span className="text-[9px] text-white/40 pl-4 truncate">

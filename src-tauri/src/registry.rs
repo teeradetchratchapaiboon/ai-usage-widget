@@ -100,7 +100,7 @@ impl ProviderRegistry {
         self.adapters
             .iter()
             .map(|adapter| {
-                adapter.get_current_summary().unwrap_or_else(|_| {
+                let mut summary = adapter.get_current_summary().unwrap_or_else(|_| {
                     ProviderSummary {
                         provider_id: adapter.provider_id().to_string(),
                         display_name: adapter.display_name().to_string(),
@@ -110,8 +110,13 @@ impl ProviderRegistry {
                         quota: None,
                         context_window: None,
                         last_activity: None,
+                        quota_resets_at: None,
                     }
-                })
+                });
+                if summary.quota_resets_at.is_none() {
+                    summary.quota_resets_at = adapter.quota_resets_at();
+                }
+                summary
             })
             .collect()
     }
@@ -217,6 +222,7 @@ mod prop_tests_provider_isolation {
                 quota: None,
                 context_window: Some(128_000),
                 last_activity: Some(Utc::now()),
+                quota_resets_at: None,
             })
         }
         fn last_checkpoint(&self) -> Option<DateTime<Utc>> {

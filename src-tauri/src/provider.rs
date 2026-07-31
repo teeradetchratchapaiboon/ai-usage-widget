@@ -44,6 +44,8 @@ pub struct ProviderSummary {
     pub context_window: Option<u64>,
     /// Timestamp of the most recent activity from this provider.
     pub last_activity: Option<DateTime<Utc>>,
+    /// When the quota window resets, for providers that publish one.
+    pub quota_resets_at: Option<DateTime<Utc>>,
 }
 
 /// Trait defining the interface for data collection adapters.
@@ -73,6 +75,11 @@ pub trait ProviderAdapter: Send + Sync {
     /// Returns the timestamp of the last successful collection checkpoint.
     fn last_checkpoint(&self) -> Option<DateTime<Utc>>;
 
+    /// When the provider's quota window resets, if it publishes one.
+    fn quota_resets_at(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
     /// Export the adapter's incremental-collection state so it can be persisted.
     ///
     /// Adapters that read nothing incrementally keep the default (empty state).
@@ -94,4 +101,7 @@ pub struct ProviderState {
     pub file_positions: std::collections::HashMap<String, u64>,
     /// Timestamp of the newest event seen so far.
     pub checkpoint: Option<DateTime<Utc>>,
+    /// Adapter-specific JSON blob (e.g. the last known quota snapshot), kept so
+    /// values that only appear while parsing survive a restart.
+    pub metadata: Option<String>,
 }
