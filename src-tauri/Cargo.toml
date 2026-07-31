@@ -1,0 +1,77 @@
+[package]
+name = "ai-usage-widget"
+version = "0.1.0"
+description = "Windows 11 Desktop Widget for tracking AI token usage from Codex Desktop and Claude Desktop"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "ai_usage_widget_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hashing (fingerprints, privacy)
+sha2 = "0.10"
+
+# Unique IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Error handling
+thiserror = "2"
+
+# Version comparison (update checks)
+semver = { version = "1", features = ["serde"] }
+
+# HTTP client (update checks only)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Windows APIs (mutex, tray, DPI, glass effects)
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_Security",
+] }
+
+# Bloom filter (deduplication)
+bloomfilter = "1"
+
+# Synchronous SQLite (for reading Codex state_5.sqlite)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Logging
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"

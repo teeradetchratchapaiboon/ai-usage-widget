@@ -1,0 +1,92 @@
+{
+  "widget": {
+    "title": "AI Usage Widget"
+  },
+  "provider": {
+    "codex": "Codex Desktop",
+    "claude": "Claude Desktop"
+  },
+  "status": {
+    "notAvailable": "Not available",
+    "loading": "Loading..."
+  },
+  "tray": {
+    "showWidget": "Show Widget",
+    "dashboard": "Dashboard",
+    "collectNow": "Collect Now",
+    "language": "Language",
+    "settings": "Settings",
+    "quit": "Quit"
+  },
+  "dashboard": {
+    "usageHistory": "Usage History",
+    "timeRange": "Time Range",
+    "day": "Day",
+    "week": "Week",
+    "month": "Month",
+    "custom": "Custom"
+  },
+  "granularity": {
+    "hourly": "Hourly",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly"
+  },
+  "tokens": {
+    "input": "Input Tokens",
+    "output": "Output Tokens",
+    "total": "Total Tokens",
+    "reasoning": "Reasoning Tokens",
+    "cachedInput": "Cached Input"
+  },
+  "quota": {
+    "fastHours": "Fast Hours",
+    "standard": "Standard",
+    "excess": "Excess",
+    "dailyTokens": "Daily Tokens"
+  },
+  "notification": {
+    "usageWarning": "Usage warning: {{provider}} at {{pct}}%",
+    "usageCritical": "Usage critical: {{provider}} at {{pct}}%"
+  },
+  "settings": {
+    "collectionInterval": "Collection Interval",
+    "language": "Language",
+    "notifications": "Notifications",
+    "autostart": "Autostart",
+    "alwaysOnTop": "Always on Top",
+    "clickThrough": "Click-through",
+    "backup": "Backup",
+    "restore": "Restore",
+    "dataDirectory": "Data Directory"
+  },
+  "time": {
+    "lastUpdated": "Last updated",
+    "ago": "ago",
+    "seconds": "seconds",
+    "minutes": "minutes",
+    "hours": "hours",
+    "days": "days"
+  },
+  "actions": {
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "refresh": "Refresh",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "update": {
+    "available": "Update available",
+    "currentVersion": "Current version",
+    "latestVersion": "Latest version",
+    "download": "Download",
+    "releaseNotes": "Release notes",
+    "dismiss": "Dismiss"
+  },
+  "errors": {
+    "generic": "An error occurred",
+    "connectionFailed": "Connection failed",
+    "dataLoadFailed": "Failed to load data",
+    "saveFailed": "Failed to save"
+  }
+}

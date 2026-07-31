@@ -1,0 +1,87 @@
+cargo :    Compiling tauri v2.11.5
+At line:1 char:32
++ $env:CARGO_TERM_COLOR="never"; cargo check 
+--lib --tests *>&1 | Out-S ...
++                                
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    
+   Compiling tauri v2.11.5:String) [], RemoteEx  
+  ception
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Checking bit-vec v0.8.0
+error: failed to run custom build command for 
+`tauri v2.11.5`
+
+Caused by:
+  process didn't exit successfully: 
+`D:\Project\AI Usage Widget\src-tauri\target\debu
+g\build\tauri-fedc70eaaf6c7723\build-script-build
+` (exit code: 101)
+  --- stdout
+  cargo:rustc-check-cfg=cfg(custom_protocol)
+  cargo:rustc-check-cfg=cfg(dev)
+  cargo:rustc-cfg=dev
+  cargo:dev=true
+  cargo:rustc-check-cfg=cfg(desktop)
+  cargo:rustc-cfg=desktop
+  cargo:rustc-check-cfg=cfg(mobile)
+  cargo:GLOBAL_API_SCRIPT_PATH=\\?\C:\Users\mmiie
+\.cargo\registry\src\index.crates.io-1949cf8c6b5b
+557f\tauri-2.11.5\scripts\bundle.global.js
+  cargo:core:path__CORE_PLUGIN___PERMISSION_FILES
+_PATH=D:\Project\AI Usage Widget\src-tauri\target
+\debug\build\tauri-a2d4740a52e71abf\out\tauri-cor
+e-path-permission-files
+  cargo:core:event__CORE_PLUGIN___PERMISSION_FILE
+S_PATH=D:\Project\AI Usage Widget\src-tauri\targe
+t\debug\build\tauri-a2d4740a52e71abf\out\tauri-co
+re-event-permission-files
+  cargo:core:window__CORE_PLUGIN___PERMISSION_FIL
+ES_PATH=D:\Project\AI Usage Widget\src-tauri\targ
+et\debug\build\tauri-a2d4740a52e71abf\out\tauri-c
+ore-window-permission-files
+  cargo:core:webview__CORE_PLUGIN___PERMISSION_FI
+LES_PATH=D:\Project\AI Usage Widget\src-tauri\tar
+get\debug\build\tauri-a2d4740a52e71abf\out\tauri-
+core-webview-permission-files
+  cargo:core:app__CORE_PLUGIN___PERMISSION_FILES_
+PATH=D:\Project\AI Usage Widget\src-tauri\target\
+debug\build\tauri-a2d4740a52e71abf\out\tauri-core
+-app-permission-files
+  cargo:core:image__CORE_PLUGIN___PERMISSION_FILE
+S_PATH=D:\Project\AI Usage Widget\src-tauri\targe
+t\debug\build\tauri-a2d4740a52e71abf\out\tauri-co
+re-image-permission-files
+  cargo:core:resources__CORE_PLUGIN___PERMISSION_
+FILES_PATH=D:\Project\AI Usage Widget\src-tauri\t
+arget\debug\build\tauri-a2d4740a52e71abf\out\taur
+i-core-resources-permission-files
+  cargo:core:menu__CORE_PLUGIN___PERMISSION_FILES
+_PATH=D:\Project\AI Usage Widget\src-tauri\target
+\debug\build\tauri-a2d4740a52e71abf\out\tauri-cor
+e-menu-permission-files
+  cargo:core:tray__CORE_PLUGIN___PERMISSION_FILES
+_PATH=D:\Project\AI Usage Widget\src-tauri\target
+\debug\build\tauri-a2d4740a52e71abf\out\tauri-cor
+e-tray-permission-files
+  cargo:core__CORE_PLUGIN___PERMISSION_FILES_PATH
+=D:\Project\AI Usage Widget\src-tauri\target\debu
+g\build\tauri-a2d4740a52e71abf\out\tauri-core-per
+mission-files
+  
+cargo:rerun-if-env-changed=REMOVE_UNUSED_COMMANDS
+
+  --- stderr
+
+  thread 'main' (44932) panicked at C:\Users\mmii
+e\.cargo\registry\src\index.crates.io-1949cf8c6b5
+b557f\tauri-2.11.5\build.rs:362:83:
+  called `Result::unwrap()` on an `Err` value: 
+unable to read Tauri config file at 
+true\tauri.conf.json because entity not found
+  note: run with `RUST_BACKTRACE=1` environment 
+variable to display a backtrace
+warning: build failed, waiting for other jobs to 
+finish...
+

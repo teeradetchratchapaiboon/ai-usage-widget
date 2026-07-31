@@ -1,0 +1,92 @@
+{
+  "widget": {
+    "title": "AI Usage Widget"
+  },
+  "provider": {
+    "codex": "Codex Desktop",
+    "claude": "Claude Desktop"
+  },
+  "status": {
+    "notAvailable": "ไม่มีข้อมูล",
+    "loading": "กำลังโหลด..."
+  },
+  "tray": {
+    "showWidget": "แสดง Widget",
+    "dashboard": "แดชบอร์ด",
+    "collectNow": "เก็บข้อมูลตอนนี้",
+    "language": "ภาษา",
+    "settings": "ตั้งค่า",
+    "quit": "ออก"
+  },
+  "dashboard": {
+    "usageHistory": "ประวัติการใช้งาน",
+    "timeRange": "ช่วงเวลา",
+    "day": "วัน",
+    "week": "สัปดาห์",
+    "month": "เดือน",
+    "custom": "กำหนดเอง"
+  },
+  "granularity": {
+    "hourly": "รายชั่วโมง",
+    "daily": "รายวัน",
+    "weekly": "รายสัปดาห์",
+    "monthly": "รายเดือน"
+  },
+  "tokens": {
+    "input": "Token นำเข้า",
+    "output": "Token ส่งออก",
+    "total": "Token ทั้งหมด",
+    "reasoning": "Token การให้เหตุผล",
+    "cachedInput": "Token แคช"
+  },
+  "quota": {
+    "fastHours": "ชั่วโมงเร็ว",
+    "standard": "มาตรฐาน",
+    "excess": "เกินโควตา",
+    "dailyTokens": "Token รายวัน"
+  },
+  "notification": {
+    "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",
+    "usageCritical": "การใช้งานวิกฤต: {{provider}} ที่ {{pct}}%"
+  },
+  "settings": {
+    "collectionInterval": "รอบเก็บข้อมูล",
+    "language": "ภาษา",
+    "notifications": "การแจ้งเตือน",
+    "autostart": "เริ่มอัตโนมัติ",
+    "alwaysOnTop": "อยู่บนสุดเสมอ",
+    "clickThrough": "คลิกทะลุ",
+    "backup": "สำรองข้อมูล",
+    "restore": "กู้คืนข้อมูล",
+    "dataDirectory": "โฟลเดอร์ข้อมูล"
+  },
+  "time": {
+    "lastUpdated": "อัปเดตล่าสุด",
+    "ago": "ที่แล้ว",
+    "seconds": "วินาที",
+    "minutes": "นาที",
+    "hours": "ชั่วโมง",
+    "days": "วัน"
+  },
+  "actions": {
+    "expand": "ขยาย",
+    "collapse": "ย่อ",
+    "refresh": "รีเฟรช",
+    "save": "บันทึก",
+    "cancel": "ยกเลิก"
+  },
+  "update": {
+    "available": "มีอัปเดตใหม่",
+    "currentVersion": "เวอร์ชันปัจจุบัน",
+    "latestVersion": "เวอร์ชันล่าสุด",
+    "download": "ดาวน์โหลด",
+    "releaseNotes": "รายละเอียดการอัปเดต",
+    "dismiss": "ปิด"
+  },
+  "errors": {
+    "generic": "เกิดข้อผิดพลาด",
+    "connectionFailed": "ไม่สามารถเชื่อมต่อได้",
+    "dataLoadFailed": "ไม่สามารถโหลดข้อมูลได้",
+    "saveFailed": "ไม่สามารถบันทึกได้"
+  }
+}
