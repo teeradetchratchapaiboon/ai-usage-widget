@@ -17,7 +17,31 @@
     "fs:allow-read-dir",
     "fs:allow-exists",
     "fs:allow-stat",
-    "http:default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$HOME/.codex/**",
+        "$LOCALAPPDATA/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/**"
+      ],
+      "deny": [
+        "**/.env",
+        "**/.env.*",
+        "**/credentials",
+        "**/credentials.json",
+        "**/*.pem",
+        "**/*.key",
+        "**/secret*",
+        "**/token*"
+      ]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://api.github.com/*" }],
+      "deny": [
+        { "url": "https://api.openai.com/*" },
+        { "url": "https://api.anthropic.com/*" }
+      ]
+    },
     "shell:allow-open",
     "notification:default",
     "notification:allow-notify",

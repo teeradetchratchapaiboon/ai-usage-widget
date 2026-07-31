@@ -230,9 +230,34 @@ pub fn build_system_tray(
         ],
     )?;
 
-    let tray = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new();
+
+    // Without an explicit icon the Shell_NotifyIcon entry renders blank on Windows,
+    // which makes the tray-only widget unreachable. Reuse the bundled window icon.
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    let tray = builder
         .menu(&menu)
         .tooltip("AI Usage Widget")
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+            use tauri::Manager;
+
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        })
         .on_menu_event(|app, event| {
             handle_tray_menu_event(app, event.id.as_ref());
         })

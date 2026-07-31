@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use chrono::{Datelike, Duration, Utc};
+use chrono::{Datelike, Duration, Local, NaiveDateTime, TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
@@ -20,6 +20,40 @@ pub struct StorageLayer {
     pub retention_days: u32,
     /// Path to the SQLite database file.
     db_path: std::path::PathBuf,
+}
+
+/// Convert a naive local wall-clock time to a UTC RFC 3339 string.
+///
+/// Ambiguous local times (DST fall-back) resolve to the earliest match; times
+/// that do not exist locally (DST spring-forward) fall back to treating the
+/// value as UTC rather than failing the query.
+fn local_naive_to_utc_string(naive_local: NaiveDateTime) -> String {
+    Local
+        .from_local_datetime(&naive_local)
+        .earliest()
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc.from_utc_datetime(&naive_local))
+        .to_rfc3339()
+}
+
+/// Start of the current day and of the current week (Monday), in *local* time,
+/// returned as UTC RFC 3339 strings for use as query boundaries.
+///
+/// "Today" has to follow the user's clock — using UTC midnight would drop the
+/// morning hours for every timezone ahead of UTC (e.g. UTC+7).
+fn current_period_starts() -> (String, String) {
+    let now_local = Local::now();
+    let today = now_local.date_naive();
+
+    let today_start = today.and_hms_opt(0, 0, 0).unwrap();
+    let week_start = (today - Duration::days(now_local.weekday().num_days_from_monday() as i64))
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+
+    (
+        local_naive_to_utc_string(today_start),
+        local_naive_to_utc_string(week_start),
+    )
 }
 
 impl StorageLayer {
@@ -186,15 +220,7 @@ impl StorageLayer {
     /// "Today" is defined as the current UTC date (from midnight to now).
     /// "This week" starts on Monday UTC midnight.
     pub async fn get_current_summary(&self) -> Result<UsageSummary, StorageError> {
-        let now = Utc::now();
-        let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let today_start_str = today_start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-        // Calculate Monday of current week
-        let days_since_monday = now.weekday().num_days_from_monday();
-        let week_start_date = now.date_naive() - Duration::days(days_since_monday as i64);
-        let week_start = week_start_date.and_hms_opt(0, 0, 0).unwrap();
-        let week_start_str = week_start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let (today_start_str, week_start_str) = current_period_starts();
 
         // Query per-provider summaries for today
         let today_rows = sqlx::query(
@@ -205,7 +231,7 @@ impl StorageLayer {
                 SUM(total_tokens) as sum_total,
                 MAX(timestamp_utc) as last_activity
             FROM usage_events
-            WHERE timestamp_utc >= ?1
+            WHERE datetime(timestamp_utc) >= datetime(?1)
             GROUP BY provider_id"#,
         )
         .bind(&today_start_str)
@@ -221,7 +247,7 @@ impl StorageLayer {
                 SUM(output_tokens) as sum_output,
                 SUM(total_tokens) as sum_total
             FROM usage_events
-            WHERE timestamp_utc >= ?1
+            WHERE datetime(timestamp_utc) >= datetime(?1)
             GROUP BY provider_id"#,
         )
         .bind(&week_start_str)
@@ -306,7 +332,7 @@ impl StorageLayer {
             providers,
             total_tokens_today,
             total_tokens_this_week,
-            last_updated: now,
+            last_updated: Utc::now(),
         })
     }
 
@@ -333,7 +359,8 @@ impl StorageLayer {
                 AVG(quota_fast_pct) as avg_quota_fast,
                 AVG(quota_standard_pct) as avg_quota_standard
             FROM usage_events
-            WHERE timestamp_utc >= ?1 AND timestamp_utc < ?2
+            WHERE datetime(timestamp_utc) >= datetime(?1)
+              AND datetime(timestamp_utc) < datetime(?2)
             GROUP BY time_bucket, provider_id
             ORDER BY time_bucket ASC, provider_id ASC"#,
             fmt = strftime_fmt
@@ -393,14 +420,7 @@ impl StorageLayer {
         &self,
         provider_id: &str,
     ) -> Result<ProviderUsageSummary, StorageError> {
-        let now = Utc::now();
-        let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let today_start_str = today_start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-        let days_since_monday = now.weekday().num_days_from_monday();
-        let week_start_date = now.date_naive() - Duration::days(days_since_monday as i64);
-        let week_start = week_start_date.and_hms_opt(0, 0, 0).unwrap();
-        let week_start_str = week_start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let (today_start_str, week_start_str) = current_period_starts();
 
         // Today's stats for this provider
         let today_row = sqlx::query(
@@ -410,7 +430,7 @@ impl StorageLayer {
                 SUM(total_tokens) as sum_total,
                 MAX(timestamp_utc) as last_activity
             FROM usage_events
-            WHERE provider_id = ?1 AND timestamp_utc >= ?2"#,
+            WHERE provider_id = ?1 AND datetime(timestamp_utc) >= datetime(?2)"#,
         )
         .bind(provider_id)
         .bind(&today_start_str)
@@ -427,7 +447,7 @@ impl StorageLayer {
                 SUM(output_tokens) as sum_output,
                 SUM(total_tokens) as sum_total
             FROM usage_events
-            WHERE provider_id = ?1 AND timestamp_utc >= ?2"#,
+            WHERE provider_id = ?1 AND datetime(timestamp_utc) >= datetime(?2)"#,
         )
         .bind(provider_id)
         .bind(&week_start_str)

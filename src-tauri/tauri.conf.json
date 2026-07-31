@@ -19,11 +19,11 @@
         "transparent": true,
         "resizable": false,
         "skipTaskbar": true,
-        "alwaysOnTop": false
+        "alwaysOnTop": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: https://api.github.com; script-src 'self'"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost https://api.github.com; script-src 'self'"
     }
   },
   "bundle": {
@@ -47,35 +47,7 @@
   },
   "plugins": {
     "fs": {
-      "scope": {
-        "allow": [
-          "$HOME/.codex/**",
-          "$LOCALAPPDATA/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/**"
-        ],
-        "deny": [
-          "**/.env",
-          "**/.env.*",
-          "**/credentials",
-          "**/credentials.json",
-          "**/*.pem",
-          "**/*.key",
-          "**/secret*",
-          "**/token*"
-        ]
-      }
-    },
-    "http": {
-      "scope": {
-        "allow": [
-          { "url": "https://api.github.com/**" }
-        ],
-        "deny": [
-          { "url": "https://api.openai.com/**" },
-          { "url": "https://*.openai.com/**" },
-          { "url": "https://api.anthropic.com/**" },
-          { "url": "https://*.anthropic.com/**" }
-        ]
-      }
+      "requireLiteralLeadingDot": false
     }
   }
 }

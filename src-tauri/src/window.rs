@@ -169,8 +169,8 @@ pub mod tauri_ops {
     use windows::Win32::Foundation::{HWND, RECT};
     use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowLongW, GetWindowRect, SetWindowLongW,
-        GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+        GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed,
+        SetWindowLongW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
     };
 
     /// Create or show the compact widget window with DPI-independent sizing.
@@ -305,14 +305,43 @@ pub mod tauri_ops {
         Ok(())
     }
 
+    /// Window classes that cover the monitor but are not fullscreen apps
+    /// (desktop shell, taskbar, Start menu / notification host).
+    const SHELL_WINDOW_CLASSES: [&str; 4] =
+        ["Progman", "WorkerW", "Shell_TrayWnd", "Windows.UI.Core.CoreWindow"];
+
+    /// Read the Win32 class name of a window.
+    fn window_class_name(hwnd: HWND) -> String {
+        let mut buf = [0u16; 256];
+        let len = unsafe { GetClassNameW(hwnd, &mut buf) };
+        if len <= 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..len as usize])
+    }
+
     /// Detect whether the current foreground window is running in fullscreen mode.
     ///
     /// Compares the foreground window's rect against the full monitor rect.
     /// Returns true if the foreground window covers the entire monitor.
+    ///
+    /// A *maximized* window also covers the monitor rect (its frame even extends a
+    /// few pixels past it), so `IsZoomed` is checked first — otherwise the widget
+    /// would hide itself whenever any ordinary maximized window has focus. Shell
+    /// windows (desktop, taskbar) are excluded for the same reason.
     pub fn is_foreground_fullscreen() -> bool {
         unsafe {
             let fg_hwnd = GetForegroundWindow();
             if fg_hwnd.0.is_null() {
+                return false;
+            }
+
+            // Maximized is not fullscreen — the taskbar is still visible.
+            if IsZoomed(fg_hwnd).as_bool() {
+                return false;
+            }
+
+            if SHELL_WINDOW_CLASSES.contains(&window_class_name(fg_hwnd).as_str()) {
                 return false;
             }
 
