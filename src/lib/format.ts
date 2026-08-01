@@ -201,6 +201,11 @@ export function formatCountdown(
       hours += 1;
       minutes = 0;
     }
+    // The carry can reach a full day: 23:59:59 away is a day, not "24 hrs"
+    if (hours === 24) {
+      days = 1;
+      hours = 0;
+    }
   }
 
   const unit = (key: string, count: number) => `${count} ${i18n.t(key, { count })}`;

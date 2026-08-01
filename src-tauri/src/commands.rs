@@ -247,6 +247,28 @@ pub async fn set_widget_collapsed(
         .get_webview_window("main")
         .ok_or_else(|| "widget window is gone".to_string())?;
 
+    // Held across the whole toggle so two of them cannot interleave: without
+    // it, both could read the pre-resize size and the writes could land in the
+    // opposite order to the resizes, leaving the config disagreeing with the
+    // window it describes.
+    let mut config = state.config.lock().await;
+
+    // Persisted first, and nothing is touched if it fails. The frontend rolls
+    // back its own flag on an error but cannot resize the window, so a failure
+    // after the resize would strand an expanded UI inside a 40px strip —
+    // exactly what this command exists to avoid.
+    //
+    // Written on every toggle rather than at shutdown: the app exits via the
+    // tray and is routinely killed, and a preference that survives only a
+    // clean exit is not a preference.
+    let previous = config.window.collapsed;
+    config.window.collapsed = collapsed;
+    if let Err(e) = config.save_to_file(&state.config_path) {
+        config.window.collapsed = previous;
+        return Err(format!("Failed to persist collapsed state: {}", e));
+    }
+    state.window_manager.set_collapsed(collapsed);
+
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     let current = window
         .inner_size()
@@ -273,18 +295,6 @@ pub async fn set_widget_collapsed(
     window
         .set_size(LogicalSize::new(current.width, height))
         .map_err(|e| e.to_string())?;
-
-    // Persist, so the widget reopens the way it was left. Written now rather
-    // than at shutdown: the app exits via the tray and is routinely killed,
-    // and a preference that survives only a clean exit is not a preference.
-    state.window_manager.set_collapsed(collapsed);
-    {
-        let mut config = state.config.lock().await;
-        config.window.collapsed = collapsed;
-        config
-            .save_to_file(&state.config_path)
-            .map_err(|e| format!("Failed to persist collapsed state: {}", e))?;
-    }
 
     Ok(())
 }

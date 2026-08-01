@@ -105,16 +105,29 @@ fn format_wait(until: DateTime<Utc>) -> Option<String> {
             hours += 1;
             minutes = 0;
         }
+        // The carry can reach a full day: 23:59:59 away is a day, not "24 hrs"
+        if hours == 24 {
+            days = 1;
+            hours = 0;
+        }
     }
 
+    // "1 day", not "1 days" — the widget pluralises, and the two sit side by
+    // side describing the same reset
+    fn unit(count: i64, singular: &str, plural: &str) -> String {
+        format!("{} {}", count, if count == 1 { singular } else { plural })
+    }
+    let day = |n| unit(n, "day", "days");
+    let hour = |n| unit(n, "hr", "hrs");
+
     Some(if days > 0 && hours > 0 {
-        format!("{} days {} hrs", days, hours)
+        format!("{} {}", day(days), hour(hours))
     } else if days > 0 {
-        format!("{} days", days)
+        day(days)
     } else if hours > 0 && minutes > 0 {
-        format!("{} hrs {} min", hours, minutes)
+        format!("{} {} min", hour(hours), minutes)
     } else if hours > 0 {
-        format!("{} hrs", hours)
+        hour(hours)
     } else {
         format!("{} min", minutes.max(1))
     })
@@ -496,6 +509,27 @@ mod tests {
         // Genuinely mid-unit values keep both parts
         let wait = format_wait(Utc::now() + chrono::Duration::minutes(299)).unwrap();
         assert_eq!(wait, "4 hrs 59 min");
+    }
+
+    #[test]
+    fn test_wait_agrees_with_the_widget_on_singulars() {
+        // The toast and the widget sit side by side describing one reset;
+        // "1 days 1 hrs" next to "1 day 1 hr" makes both look broken.
+        let wait = format_wait(Utc::now() + chrono::Duration::seconds(90_000)).unwrap();
+        assert_eq!(wait, "1 day 1 hr");
+
+        let wait = format_wait(Utc::now() + chrono::Duration::hours(1)).unwrap();
+        assert_eq!(wait, "1 hr");
+
+        let wait = format_wait(Utc::now() + chrono::Duration::seconds(2 * 86_400)).unwrap();
+        assert_eq!(wait, "2 days");
+    }
+
+    #[test]
+    fn test_almost_a_day_is_a_day_not_twenty_four_hours() {
+        // The minute carry can push the hours to 24, which has to become a day
+        let wait = format_wait(Utc::now() + chrono::Duration::seconds(86_399)).unwrap();
+        assert_eq!(wait, "1 day");
     }
 
     #[test]

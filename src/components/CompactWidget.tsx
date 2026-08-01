@@ -115,9 +115,11 @@ export function CompactWidget() {
   // stranding an expanded UI in a strip too short to show the way out.
   useEffect(() => {
     getWidgetCollapsed()
-      .then((persisted) => {
+      .then(async (persisted) => {
+        // The window is told first: adopting the flag before the resize is
+        // accepted would leave React describing a shape the window refused.
+        await setWidgetCollapsed(persisted);
         setCollapsed(persisted);
-        return setWidgetCollapsed(persisted);
       })
       .catch((err) => {
         console.warn("Could not restore the collapsed state:", err);

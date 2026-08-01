@@ -16,6 +16,7 @@
         "width": 340,
         "height": 300,
         "decorations": false,
+        "visible": false,
         "transparent": true,
         "resizable": true,
         "minWidth": 280,
@@ -30,7 +31,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,7 +44,10 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English", "Thai"],
+        "languages": [
+          "English",
+          "Thai"
+        ],
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico"
       }

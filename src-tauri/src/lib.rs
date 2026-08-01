@@ -238,6 +238,39 @@ pub fn run() {
                 log::info!("{}", note);
             }
 
+            // Restore the placement the user left the widget in.
+            //
+            // The window is declared hidden in tauri.conf.json and shown at the
+            // end of this block: sizing it afterwards would be visible, and a
+            // widget left collapsed spent half a second at full height before
+            // snapping shut on every launch.
+            if let Some(main_window) = app.get_webview_window("main") {
+                let (width, height) = window_manager.startup_widget_size();
+                if width > 0 && height > 0 {
+                    if window_manager.is_collapsed() {
+                        // The collapsed height is below the configured minimum
+                        let _ = main_window.set_min_size(Some(tauri::LogicalSize::new(
+                            280.0,
+                            crate::window::WindowManager::COLLAPSED_HEIGHT as f64,
+                        )));
+                    }
+                    let _ = main_window
+                        .set_size(tauri::LogicalSize::new(width as f64, height as f64));
+                }
+                if let Some(position) = window_manager
+                    .load_persisted_position()
+                    .or_else(|| window_manager.get_persisted_position())
+                {
+                    let _ = main_window
+                        .set_position(tauri::LogicalPosition::new(position.x, position.y));
+                }
+
+                // Unconditional: every step above is best-effort, and a widget
+                // that stays hidden because one of them failed is unreachable
+                // except through the tray.
+                let _ = main_window.show();
+            }
+
             // Build system tray with context menu
             let _tray = tray::build_system_tray(app, &tray_locale)?;
 
@@ -262,23 +295,6 @@ pub fn run() {
                 log::warn!("Failed to register global shortcut: {}", e);
             });
 
-            // Restore the placement the user left the widget in
-            if let Some(main_window) = app.get_webview_window("main") {
-                let saved = window_manager.current_config();
-                if saved.width > 0 && saved.height > 0 {
-                    let _ = main_window.set_size(tauri::LogicalSize::new(
-                        saved.width as f64,
-                        saved.height as f64,
-                    ));
-                }
-                if let Some(position) = window_manager
-                    .load_persisted_position()
-                    .or_else(|| window_manager.get_persisted_position())
-                {
-                    let _ = main_window
-                        .set_position(tauri::LogicalPosition::new(position.x, position.y));
-                }
-            }
 
             // Remember where the user drags/resizes the widget to. The widget
             // has no title bar, so this is the only record of its placement.

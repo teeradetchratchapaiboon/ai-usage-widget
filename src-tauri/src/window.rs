@@ -57,7 +57,15 @@ impl WindowManager {
     }
 
     /// Remember the widget height to restore when it is expanded again.
+    ///
+    /// Collapsing an already-collapsed widget — which a webview reload does,
+    /// since the frontend re-asserts the persisted state on mount — would
+    /// otherwise record the 40px strip as the height to restore, and the
+    /// user's real height would be gone.
     pub fn remember_expanded_height(&self, height: f64) {
+        if height < Self::MIN_PERSISTABLE_HEIGHT as f64 {
+            return;
+        }
         *self.expanded_height.lock().unwrap() = Some(height);
     }
 
@@ -669,6 +677,20 @@ mod collapse_persistence_tests {
 
         wm.persist_size(420, 520);
         assert_eq!(wm.compact_widget_size(), (420, 520));
+    }
+
+    #[test]
+    fn test_collapsing_twice_does_not_forget_the_real_height() {
+        // A webview reload makes the frontend re-assert "collapsed" while the
+        // window is already 40px. Recording that as the height to restore
+        // would lose the user's size for good.
+        let wm = manager();
+        let (_, expanded) = wm.compact_widget_size();
+
+        wm.remember_expanded_height(expanded as f64);
+        wm.remember_expanded_height(WindowManager::COLLAPSED_HEIGHT as f64);
+
+        assert_eq!(wm.take_expanded_height(), expanded as f64);
     }
 
     #[test]

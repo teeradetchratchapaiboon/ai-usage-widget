@@ -85,6 +85,18 @@ describe("formatCountdown", () => {
     expect(formatCountdown(inSeconds(3 * DAY + 4 * HOUR + 30 * 60))).toBe("in 3 days 5 hrs");
   });
 
+  it("says a day rather than 24 hrs when the minutes carry that far", () => {
+    expect(formatCountdown(inSeconds(DAY - 1))).toBe("in 1 day");
+  });
+
+  it("agrees with the toast's wording, singulars included", () => {
+    // The Rust side renders the same reset in the notification; "1 days 1 hrs"
+    // beside "1 day 1 hr" makes both look broken.
+    expect(formatCountdown(inSeconds(DAY + HOUR))).toBe("in 1 day 1 hr");
+    expect(formatCountdown(inSeconds(HOUR))).toBe("in 1 hr");
+    expect(formatCountdown(inSeconds(2 * DAY))).toBe("in 2 days");
+  });
+
   it("marks an approximate wait on the number, not the whole phrase", () => {
     // Claude's resets are reconstructed from its history; the uncertainty is
     // in the quantity, so "in ~4 hrs" is where the marker belongs.
