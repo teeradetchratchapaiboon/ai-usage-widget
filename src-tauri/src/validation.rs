@@ -95,7 +95,7 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
 
     // Validate collection interval if provided
     if let Some(interval) = settings.collection_interval_secs {
-        if interval < MIN_COLLECTION_INTERVAL_SECS || interval > MAX_COLLECTION_INTERVAL_SECS {
+        if !(MIN_COLLECTION_INTERVAL_SECS..=MAX_COLLECTION_INTERVAL_SECS).contains(&interval) {
             return Err(ValidationError::InvalidInterval(
                 interval,
                 MIN_COLLECTION_INTERVAL_SECS,
@@ -106,7 +106,7 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
 
     // Validate retention days if provided
     if let Some(days) = settings.retention_days {
-        if days < MIN_RETENTION_DAYS || days > MAX_RETENTION_DAYS {
+        if !(MIN_RETENTION_DAYS..=MAX_RETENTION_DAYS).contains(&days) {
             return Err(ValidationError::InvalidRetentionDays(
                 days,
                 MIN_RETENTION_DAYS,
@@ -473,9 +473,8 @@ mod prop_tests_validation {
     use proptest::prelude::*;
     use proptest::test_runner::Config;
 
-    /// **Validates: Requirements 11.6, 11.7**
-    ///
-    /// Property: Time ranges where start >= end must be rejected.
+    // **Validates: Requirements 11.6, 11.7**
+    //    // Property: Time ranges where start >= end must be rejected.
     proptest! {
         #![proptest_config(Config::with_cases(50))]
         #[test]
@@ -490,9 +489,8 @@ mod prop_tests_validation {
         }
     }
 
-    /// **Validates: Requirements 11.6, 11.7**
-    ///
-    /// Property: Time ranges longer than 366 days must be rejected.
+    // **Validates: Requirements 11.6, 11.7**
+    //    // Property: Time ranges longer than 366 days must be rejected.
     proptest! {
         #![proptest_config(Config::with_cases(50))]
         #[test]
@@ -508,9 +506,8 @@ mod prop_tests_validation {
         }
     }
 
-    /// **Validates: Requirements 11.6, 11.7**
-    ///
-    /// Property: Time ranges with end dates far in the future (> 1 hour) must be rejected.
+    // **Validates: Requirements 11.6, 11.7**
+    //    // Property: Time ranges with end dates far in the future (> 1 hour) must be rejected.
     proptest! {
         #![proptest_config(Config::with_cases(50))]
         #[test]
@@ -526,9 +523,8 @@ mod prop_tests_validation {
         }
     }
 
-    /// **Validates: Requirements 11.6, 11.7**
-    ///
-    /// Property: Valid ranges (start < end, duration <= 366 days, end not far in future) must be accepted.
+    // **Validates: Requirements 11.6, 11.7**
+    //    // Property: Valid ranges (start < end, duration <= 366 days, end not far in future) must be accepted.
     proptest! {
         #![proptest_config(Config::with_cases(50))]
         #[test]
@@ -545,9 +541,8 @@ mod prop_tests_validation {
         }
     }
 
-    /// **Validates: Requirements 11.6, 11.7**
-    ///
-    /// Property: Collection intervals outside 10-3600 must be rejected; values within range must be accepted.
+    // **Validates: Requirements 11.6, 11.7**
+    //    // Property: Collection intervals outside 10-3600 must be rejected; values within range must be accepted.
     proptest! {
         #![proptest_config(Config::with_cases(50))]
         #[test]
@@ -558,7 +553,7 @@ mod prop_tests_validation {
             };
             let result = validate_settings(&settings);
 
-            if interval >= 10 && interval <= 3600 {
+            if (10..=3600).contains(&interval) {
                 prop_assert!(result.is_ok(),
                     "Expected interval {} to be accepted, but got Err: {:?}",
                     interval, result);

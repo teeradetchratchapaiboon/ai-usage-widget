@@ -107,6 +107,13 @@ impl WindowManager {
         }
     }
 
+    /// Persist the window size to config.
+    pub fn persist_size(&self, width: u32, height: u32) {
+        let mut cfg = self.config.lock().unwrap();
+        cfg.width = width;
+        cfg.height = height;
+    }
+
     /// Persist the window position to config and to disk.
     pub fn persist_position(&self, x: i32, y: i32, monitor: Option<String>) {
         {

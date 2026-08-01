@@ -33,13 +33,13 @@ pub fn compute_fingerprint(event: &RawUsageEvent) -> EventFingerprint {
     }
 
     if let Some(total) = event.tokens.total_tokens {
-        hasher.update(&total.to_le_bytes());
+        hasher.update(total.to_le_bytes());
     }
     if let Some(input) = event.tokens.input_tokens {
-        hasher.update(&input.to_le_bytes());
+        hasher.update(input.to_le_bytes());
     }
     if let Some(output) = event.tokens.output_tokens {
-        hasher.update(&output.to_le_bytes());
+        hasher.update(output.to_le_bytes());
     }
 
     let result: [u8; 32] = hasher.finalize().into();
@@ -350,8 +350,7 @@ mod prop_tests_dedup_completeness {
         ///
         /// After marking a set of events as seen, deduplicating the same events
         /// must return an empty result (all are rejected).
-        ///
-        /// **Validates: Requirements 2.2, 2.3**
+        //        // **Validates: Requirements 2.2, 2.3**
         #[test]
         fn dedup_completeness_rejects_stored_events(events in arb_event_vec()) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -361,7 +360,7 @@ mod prop_tests_dedup_completeness {
 
                 // Mark all events as seen
                 let fingerprints: Vec<EventFingerprint> = events.iter()
-                    .map(|e| compute_fingerprint(e))
+                    .map(compute_fingerprint)
                     .collect();
                 engine.mark_seen(&fingerprints).await.unwrap();
 
@@ -376,8 +375,7 @@ mod prop_tests_dedup_completeness {
         ///
         /// If no events have been marked as seen, then deduplication must pass
         /// through all input events (none are falsely rejected).
-        ///
-        /// **Validates: Requirements 2.2, 2.3**
+        //        // **Validates: Requirements 2.2, 2.3**
         #[test]
         fn dedup_no_false_rejection(events in arb_event_vec()) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -390,7 +388,7 @@ mod prop_tests_dedup_completeness {
 
                 // Collect fingerprints of input and output for comparison
                 let input_fps: Vec<EventFingerprint> = events.iter()
-                    .map(|e| compute_fingerprint(e))
+                    .map(compute_fingerprint)
                     .collect();
                 let output_fps: Vec<EventFingerprint> = result.iter()
                     .map(|(_, fp)| fp.clone())
@@ -416,8 +414,7 @@ mod prop_tests_dedup_completeness {
         ///
         /// Running deduplication on a batch, marking them as seen, then deduplicating
         /// the same batch again must produce an empty result.
-        ///
-        /// **Validates: Requirements 2.2, 2.3**
+        //        // **Validates: Requirements 2.2, 2.3**
         #[test]
         fn dedup_idempotency(events in arb_event_vec()) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -444,8 +441,7 @@ mod prop_tests_dedup_completeness {
         ///
         /// No events are created out of thin air; every output event's fingerprint
         /// must match one of the input events' fingerprints.
-        ///
-        /// **Validates: Requirements 2.2, 2.3**
+        //        // **Validates: Requirements 2.2, 2.3**
         #[test]
         fn dedup_output_is_subset_of_input(events in arb_event_vec()) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -454,7 +450,7 @@ mod prop_tests_dedup_completeness {
                 let engine = DeduplicationEngine::new(db.clone()).await.unwrap();
 
                 let input_fps: HashSet<EventFingerprint> = events.iter()
-                    .map(|e| compute_fingerprint(e))
+                    .map(compute_fingerprint)
                     .collect();
 
                 let result = engine.deduplicate(events).await.unwrap();
@@ -476,8 +472,7 @@ mod prop_tests_dedup_completeness {
         /// **Property: Ordering preservation — output preserves input order of non-duplicate events.**
         ///
         /// The relative order of events in the output must match their order in the input.
-        ///
-        /// **Validates: Requirements 2.2, 2.3**
+        //        // **Validates: Requirements 2.2, 2.3**
         #[test]
         fn dedup_preserves_ordering(events in arb_event_vec()) {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -610,8 +605,7 @@ mod prop_tests {
         /// **Property: Determinism**
         /// For any arbitrary RawUsageEvent, computing the fingerprint twice always
         /// produces the same result.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_is_deterministic(event in arb_raw_usage_event()) {
             let fp1 = compute_fingerprint(&event);
@@ -623,8 +617,7 @@ mod prop_tests {
         /// The same event computed at different logical "times" (i.e., calling
         /// compute_fingerprint at different points) always produces the same fingerprint.
         /// This verifies the fingerprint does not incorporate the current wall clock.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_stable_across_invocations(event in arb_raw_usage_event()) {
             let fp1 = compute_fingerprint(&event);
@@ -636,8 +629,7 @@ mod prop_tests {
 
         /// **Property: Input sensitivity — different provider_id**
         /// Two events that differ only in provider_id produce different fingerprints.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_sensitive_to_provider_id(
             event in arb_raw_usage_event(),
@@ -655,8 +647,7 @@ mod prop_tests {
 
         /// **Property: Input sensitivity — different timestamp**
         /// Two events that differ only in timestamp produce different fingerprints.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_sensitive_to_timestamp(
             event in arb_raw_usage_event(),
@@ -674,8 +665,7 @@ mod prop_tests {
 
         /// **Property: Input sensitivity — different event_type**
         /// Two events that differ only in event_type produce different fingerprints.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_sensitive_to_event_type(
             event in arb_raw_usage_event(),
@@ -694,8 +684,7 @@ mod prop_tests {
         /// **Property: Input sensitivity — different model**
         /// Two events that differ in model (Some vs None, or different model strings)
         /// produce different fingerprints.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_sensitive_to_model(
             event in arb_raw_usage_event(),
@@ -714,8 +703,7 @@ mod prop_tests {
         /// **Property: Input sensitivity — different token values**
         /// Two events that differ in total_tokens, input_tokens, or output_tokens
         /// produce different fingerprints.
-        ///
-        /// **Validates: Requirements 2.1, 2.5**
+        //        // **Validates: Requirements 2.1, 2.5**
         #[test]
         fn fingerprint_sensitive_to_token_values(
             event in arb_raw_usage_event(),

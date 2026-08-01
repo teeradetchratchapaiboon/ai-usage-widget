@@ -669,21 +669,6 @@ mod prop_tests_reconciliation {
         count
     }
 
-    /// Helper: count non-None fields in an optional QuotaUsage.
-    fn count_quota_fields(q: &Option<QuotaUsage>) -> usize {
-        match q {
-            None => 0,
-            Some(qu) => {
-                let mut count = 0;
-                if qu.fast_hours_pct.is_some() { count += 1; }
-                if qu.standard_pct.is_some() { count += 1; }
-                if qu.excess_pct.is_some() { count += 1; }
-                if qu.daily_tokens.is_some() { count += 1; }
-                count
-            }
-        }
-    }
-
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(20))]
 
@@ -693,8 +678,7 @@ mod prop_tests_reconciliation {
         /// from ANY source event must appear in the reconciled output.
         /// Specifically: for quota fields (merged via complement), every non-None
         /// value from any source must be present in the output.
-        ///
-        /// **Validates: Requirements 3.5**
+        //        // **Validates: Requirements 3.5**
         #[test]
         fn reconciliation_no_information_loss_quota(events in arb_grouped_events()) {
             let engine = ReconciliationEngine::new();
@@ -749,8 +733,7 @@ mod prop_tests_reconciliation {
         ///
         /// The `source_count` field in the output equals the number of raw events
         /// that contributed to that reconciled event.
-        ///
-        /// **Validates: Requirements 3.4**
+        //        // **Validates: Requirements 3.4**
         #[test]
         fn reconciliation_source_count_accuracy(events in arb_grouped_events()) {
             let engine = ReconciliationEngine::new();
@@ -770,8 +753,7 @@ mod prop_tests_reconciliation {
         ///
         /// When merging tokens, the result should have at least as many non-None
         /// fields as the most detailed input.
-        ///
-        /// **Validates: Requirements 3.2**
+        //        // **Validates: Requirements 3.2**
         #[test]
         fn reconciliation_merge_prefers_more_detail(events in arb_grouped_events()) {
             let engine = ReconciliationEngine::new();
@@ -795,8 +777,7 @@ mod prop_tests_reconciliation {
         ///
         /// When events have complementary quota fields (one has fast_hours, another
         /// has standard), the merged result has ALL non-None fields from both sources.
-        ///
-        /// **Validates: Requirements 3.3**
+        //        // **Validates: Requirements 3.3**
         #[test]
         fn reconciliation_complementary_quota_merging(events in arb_grouped_events()) {
             let engine = ReconciliationEngine::new();
@@ -847,8 +828,7 @@ mod prop_tests_reconciliation {
         /// **Property 5: Output count <= Input count**
         ///
         /// Reconciliation never creates more events than it receives.
-        ///
-        /// **Validates: Requirements 3.2, 3.3, 3.4, 3.5**
+        //        // **Validates: Requirements 3.2, 3.3, 3.4, 3.5**
         #[test]
         fn reconciliation_output_count_leq_input(events in arb_event_vec()) {
             let engine = ReconciliationEngine::new();

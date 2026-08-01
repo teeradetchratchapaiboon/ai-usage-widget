@@ -39,9 +39,10 @@ struct JsonlLine {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum JsonlPayload {
-    TokenCount(TokenCountPayload),
+    TokenCount(Box<TokenCountPayload>),
     SessionMeta(SessionMetaPayload),
-    Other(serde_json::Value),
+    /// Anything else in the log — matched and discarded without allocating.
+    Other(serde::de::IgnoredAny),
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,8 +111,6 @@ struct TokenUsageData {
 
 #[derive(Debug, Deserialize)]
 struct SessionMetaPayload {
-    #[serde(rename = "type")]
-    payload_type: Option<String>,
     model: Option<String>,
 }
 
@@ -209,10 +208,7 @@ impl CodexAdapter {
         let newest = self
             .discover_jsonl_files()
             .into_iter()
-            .filter_map(|path| {
-                let modified = fs::metadata(&path).and_then(|m| m.modified()).ok()?;
-                Some((modified, path))
-            })
+            .filter_map(|path| Some((fs::metadata(&path).and_then(|m| m.modified()).ok()?, path)))
             .max_by_key(|(modified, _)| *modified)
             .map(|(_, path)| path);
 
@@ -310,7 +306,7 @@ impl CodexAdapter {
         let project_hash = path
             .parent()
             .and_then(|p| p.to_str())
-            .map(|s| hash_string(s));
+            .map(hash_string);
 
         for line_result in reader.lines() {
             let line = match line_result {
@@ -499,7 +495,7 @@ impl CodexAdapter {
 
         let events: Vec<RawUsageEvent> = rows
             .into_iter()
-            .filter_map(|row| {
+            .map(|row| {
                 let timestamp = row
                     .updated_at
                     .as_deref()
@@ -510,7 +506,7 @@ impl CodexAdapter {
                 let session_hash = hash_string(&row.id);
                 let project_hash = row.cwd.as_deref().map(hash_string);
 
-                Some(RawUsageEvent {
+                RawUsageEvent {
                     provider_id: "codex".to_string(),
                     event_type: EventType::SessionSummary,
                     timestamp,
@@ -528,7 +524,7 @@ impl CodexAdapter {
                     project_hash,
                     source_file: Some("state_5.sqlite".to_string()),
                     raw_metadata: None,
-                })
+                }
             })
             .collect();
 
@@ -724,9 +720,8 @@ fn read_thread_rows(
         })
     };
 
-    let rows = if since.is_some() {
-        let since_str = since.unwrap().to_rfc3339();
-        stmt.query_map(rusqlite::params![since_str], row_mapper)
+    let rows = if let Some(since) = since {
+        stmt.query_map(rusqlite::params![since.to_rfc3339()], row_mapper)
     } else {
         stmt.query_map([], row_mapper)
     }
@@ -990,10 +985,8 @@ mod prop_tests_jsonl_reader {
             prop_assert!(offset1 > 0);
 
             // Now shrink the file (write fewer events)
-            let small_lines = vec![
-                session_meta_line("o1-mini"),
-                valid_token_line(42, 84, 126),
-            ];
+            let small_lines = [session_meta_line("o1-mini"),
+                valid_token_line(42, 84, 126)];
             let small_content = small_lines.join("\n") + "\n";
             fs::write(&file_path, &small_content).unwrap();
 

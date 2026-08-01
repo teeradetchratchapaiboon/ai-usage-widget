@@ -878,7 +878,7 @@ mod prop_tests_storage_roundtrip {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    /// **Validates: Requirements 4.6, 4.7, 15.1, 15.3, 15.6**
+    // **Validates: Requirements 4.6, 4.7, 15.1, 15.3, 15.6**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 
@@ -1261,7 +1261,7 @@ mod prop_tests_backup_corruption {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    /// **Validates: Requirements 15.2, 15.4**
+    // **Validates: Requirements 15.2, 15.4**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 
@@ -1615,7 +1615,7 @@ mod prop_tests_retention {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    /// **Validates: Requirements 4.3**
+    // **Validates: Requirements 4.3**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 
@@ -2037,7 +2037,7 @@ mod prop_tests_aggregation {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    /// **Validates: Requirements 4.4, 7.5**
+    // **Validates: Requirements 4.4, 7.5**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 
@@ -2512,7 +2512,7 @@ mod prop_tests_timestamp_consistency {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    /// **Validates: Requirements 4.2, 9.4**
+    // **Validates: Requirements 4.2, 9.4**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 
@@ -2642,7 +2642,7 @@ mod prop_tests_timestamp_consistency {
     }
 
     fn arb_reconciled_event() -> impl Strategy<Value = ReconciledEvent> {
-        arb_timestamp_with_subsecond().prop_flat_map(|ts| arb_reconciled_event_with_timestamp(ts))
+        arb_timestamp_with_subsecond().prop_flat_map(arb_reconciled_event_with_timestamp)
     }
 
     fn arb_events_vec(min: usize, max: usize) -> impl Strategy<Value = Vec<ReconciledEvent>> {

@@ -318,6 +318,17 @@ pub async fn update_settings(
         config.notification_critical_pct = pct;
     }
 
+    // Tell every window about a locale change so the widget and the dashboard
+    // stay in the same language
+    if let Some(ref locale) = settings.locale {
+        use tauri::Emitter;
+        if let Err(e) = app.emit("locale-changed", locale.clone()) {
+            log::warn!("Failed to broadcast locale change: {}", e);
+        }
+        #[cfg(not(test))]
+        crate::tray::apply_locale(&app, locale);
+    }
+
     // Notification thresholds take effect on the running scheduler
     if settings.notification_warning_pct.is_some() || settings.notification_critical_pct.is_some() {
         let mut scheduler = state.scheduler.lock().await;
@@ -407,8 +418,8 @@ pub async fn restore_data(
 pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let current_version = env!("CARGO_PKG_VERSION");
 
-    // Parse current version
-    let current = semver::Version::parse(current_version)
+    // Fail fast if our own version is not valid semver
+    semver::Version::parse(current_version)
         .map_err(|e| format!("Failed to parse current version '{}': {}", current_version, e))?;
 
     // Every outbound request goes through the network guard: only
@@ -451,38 +462,32 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .unwrap_or("")
         .trim_start_matches('v');
 
-    let latest = match semver::Version::parse(tag) {
-        Ok(v) => v,
-        Err(_) => return Ok(None), // Unparseable version tag, skip
-    };
+    // Same comparison the unit tests exercise
+    match compare_versions(current_version, tag) {
+        Some(latest_version) => {
+            let download_url = release["html_url"].as_str().unwrap_or("").to_string();
+            let release_notes = release["body"].as_str().map(|s| s.to_string());
 
-    if latest > current {
-        let download_url = release["html_url"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-
-        let release_notes = release["body"].as_str().map(|s| s.to_string());
-
-        Ok(Some(UpdateInfo {
-            current_version: current.to_string(),
-            latest_version: latest.to_string(),
-            download_url,
-            release_notes,
-        }))
-    } else {
-        Ok(None)
+            Ok(Some(UpdateInfo {
+                current_version: current_version.to_string(),
+                latest_version,
+                download_url,
+                release_notes,
+            }))
+        }
+        None => Ok(None),
     }
 }
 
 
 // ─── Testable Helper Functions ──────────────────────────────────────────────────
 
-/// Compare two version strings and determine if an update is available.
-/// Returns Some(latest) if latest > current, None otherwise.
+/// Compare two version strings and report the newer one.
+/// Returns `Some(latest)` when `latest` is newer than `current`.
 fn compare_versions(current: &str, latest: &str) -> Option<String> {
     let current_v = semver::Version::parse(current).ok()?;
     let latest_v = semver::Version::parse(latest).ok()?;
+
     if latest_v > current_v {
         Some(latest_v.to_string())
     } else {
@@ -497,7 +502,7 @@ mod prop_tests_version_comparison {
     use super::compare_versions;
     use proptest::prelude::*;
 
-    /// **Validates: Requirements 12.5**
+    // **Validates: Requirements 12.5**
 
     /// Strategy to generate valid semver version components (0-99 range for practical testing)
     fn version_component() -> impl Strategy<Value = u32> {
@@ -508,21 +513,6 @@ mod prop_tests_version_comparison {
     fn semver_version() -> impl Strategy<Value = String> {
         (version_component(), version_component(), version_component())
             .prop_map(|(major, minor, patch)| format!("{}.{}.{}", major, minor, patch))
-    }
-
-    /// Strategy to generate a valid semver version with optional pre-release
-    fn semver_version_with_prerelease() -> impl Strategy<Value = String> {
-        prop_oneof![
-            // Plain version
-            semver_version(),
-            // Version with pre-release identifier
-            (version_component(), version_component(), version_component(), prop_oneof![
-                Just("alpha".to_string()),
-                Just("beta".to_string()),
-                Just("rc.1".to_string()),
-                Just("rc.2".to_string()),
-            ]).prop_map(|(major, minor, patch, pre)| format!("{}.{}.{}-{}", major, minor, patch, pre)),
-        ]
     }
 
     proptest! {

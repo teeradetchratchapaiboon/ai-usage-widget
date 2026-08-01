@@ -47,7 +47,8 @@
     "dailyTokens": "Daily Tokens",
     "label": "Quota",
     "used": "Quota used",
-    "resetsAt": "Resets"
+    "resetsAt": "Resets",
+    "remaining": "Quota left"
   },
   "notification": {
     "usageWarning": "Usage warning: {{provider}} at {{pct}}%",
@@ -93,5 +94,8 @@
     "connectionFailed": "Connection failed",
     "dataLoadFailed": "Failed to load data",
     "saveFailed": "Failed to save"
+  },
+  "window": {
+    "maximize": "Maximize / restore"
   }
 }

@@ -6,17 +6,32 @@
  */
 
 interface ProviderMeterProps {
-  /** Label for the meter (e.g., "Fast Hours") */
+  /** Label for the meter (e.g., "Quota left") */
   label: string;
-  /** Current percentage (0-100+, excess can exceed 100) */
+  /** Bar fill percentage (0-100+, excess can exceed 100) */
   percentage: number | null;
-  /** Formatted value text to display (e.g., "75.0%") */
+  /** Formatted value text to display (e.g., "18%") */
   valueText: string;
+  /**
+   * How to colour the bar. "high" means a high number is bad (usage);
+   * "low" means a low number is bad (remaining quota).
+   */
+  danger?: "high" | "low";
 }
 
-export function ProviderMeter({ label, percentage, valueText }: ProviderMeterProps) {
-  // Determine bar color based on percentage thresholds
+export function ProviderMeter({
+  label,
+  percentage,
+  valueText,
+  danger = "high",
+}: ProviderMeterProps) {
+  // Determine bar color based on which end of the scale is the bad one
   const getBarColor = (pct: number): string => {
+    if (danger === "low") {
+      if (pct <= 10) return "bg-red-400";
+      if (pct <= 25) return "bg-yellow-400";
+      return "bg-green-400";
+    }
     if (pct >= 90) return "bg-red-400";
     if (pct >= 75) return "bg-yellow-400";
     return "bg-blue-400";
@@ -27,7 +42,7 @@ export function ProviderMeter({ label, percentage, valueText }: ProviderMeterPro
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-white/70 w-14 truncate">{label}</span>
+      <span className="text-[10px] text-white/70 w-16 truncate">{label}</span>
       <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
         {percentage !== null && (
           <div

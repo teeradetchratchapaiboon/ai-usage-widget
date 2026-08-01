@@ -107,11 +107,7 @@ fn extract_host(url: &str) -> Option<String> {
     // Must have a scheme
     let after_scheme = if let Some(rest) = url.strip_prefix("https://") {
         rest
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        rest
-    } else {
-        return None;
-    };
+    } else { url.strip_prefix("http://")? };
 
     if after_scheme.is_empty() {
         return None;
@@ -234,7 +230,7 @@ mod tests {
     }
 }
 
-/// **Validates: Requirements 5.1, 5.2, 5.5**
+// **Validates: Requirements 5.1, 5.2, 5.5**
 ///
 /// Property 6: Network Guard Completeness
 /// Verifies that the NetworkGuard correctly blocks inference endpoints,

@@ -409,7 +409,7 @@ mod tests {
 }
 
 /// Property-based tests for exponential backoff correctness.
-/// **Validates: Requirements 16.2, 16.3**
+// **Validates: Requirements 16.2, 16.3**
 #[cfg(test)]
 mod prop_tests_backoff {
     use super::*;
@@ -421,7 +421,7 @@ mod prop_tests_backoff {
 
         /// Property 15.1: Backoff formula correctness
         /// The interval after N consecutive errors should be min(30 * 2^N, 300) seconds.
-        /// **Validates: Requirements 16.2**
+        // **Validates: Requirements 16.2**
         #[test]
         fn backoff_formula_correct(consecutive_errors in 0u32..20) {
             let mut scheduler = CollectionScheduler::new(30);
@@ -437,7 +437,7 @@ mod prop_tests_backoff {
 
         /// Property 15.2: Max cap at 300
         /// The backoff interval never exceeds 300 seconds, regardless of error count.
-        /// **Validates: Requirements 16.2**
+        // **Validates: Requirements 16.2**
         #[test]
         fn backoff_never_exceeds_max(consecutive_errors in 0u32..1000) {
             let mut scheduler = CollectionScheduler::new(30);
@@ -453,7 +453,7 @@ mod prop_tests_backoff {
         /// Property 15.3: Reset on success
         /// After a successful collection (consecutive_errors reset to 0), the interval
         /// should be either the default (30s) or adaptive (15s if >50 events).
-        /// **Validates: Requirements 16.3**
+        // **Validates: Requirements 16.3**
         #[test]
         fn reset_on_success_restores_default(
             prior_errors in 1u32..20,
@@ -486,7 +486,7 @@ mod prop_tests_backoff {
 
         /// Property 15.4: Monotonic increase
         /// Each consecutive error increases the interval (until the cap is reached).
-        /// **Validates: Requirements 16.2**
+        // **Validates: Requirements 16.2**
         #[test]
         fn backoff_monotonically_increases(n in 0u32..10) {
             let mut scheduler_n = CollectionScheduler::new(30);
@@ -504,7 +504,7 @@ mod prop_tests_backoff {
 
         /// Property 15.5: Adaptive interval
         /// When >50 new events are collected on success, the interval should be 15s.
-        /// **Validates: Requirements 16.3**
+        // **Validates: Requirements 16.3**
         #[test]
         fn adaptive_interval_on_high_volume(event_count in 51usize..1000) {
             let mut scheduler = CollectionScheduler::new(30);

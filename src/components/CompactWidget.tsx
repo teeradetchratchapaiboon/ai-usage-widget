@@ -14,6 +14,7 @@ import {
   formatResetTime,
 } from "../lib/format";
 import { openDashboard } from "../lib/ipc";
+import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
 import { LoadingSkeleton } from "./LoadingSkeleton";
@@ -31,6 +32,11 @@ function highestQuota(provider: {
   ].filter((v): v is number => typeof v === "number");
 
   return values.length > 0 ? Math.max(...values) : null;
+}
+
+/** Quota left, from the consumed percentage the providers report. */
+function remainingPct(usedPct: number): number {
+  return Math.max(0, Math.min(100, 100 - usedPct));
 }
 
 export function CompactWidget() {
@@ -52,23 +58,52 @@ export function CompactWidget() {
 
   if (isLoading && !usage) {
     return (
-      <div className="widget-glass w-[340px] h-[200px] rounded-lg p-3 flex flex-col">
+      <div className="widget-glass w-screen h-screen rounded-lg p-3 flex flex-col">
         <LoadingSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="widget-glass w-[340px] h-[200px] rounded-lg p-3 flex flex-col gap-2 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <h1 className="text-xs font-semibold text-white/90 truncate">
+    <div className="widget-glass w-screen h-screen rounded-lg p-3 flex flex-col overflow-hidden">
+      {/* Content stays readable when the window is enlarged or maximized */}
+      <div className="flex flex-col gap-2 flex-1 min-h-0 w-full max-w-md mx-auto">
+      {/* Header doubles as the drag handle: the window has no title bar */}
+      <div
+        data-tauri-drag-region
+        onDoubleClick={() => void toggleMaximizeWindow()}
+        className="flex items-center justify-between gap-2 min-w-0 cursor-move select-none"
+      >
+        <h1
+          data-tauri-drag-region
+          className="text-xs font-semibold text-white/90 truncate"
+        >
           {t("widget.title")}
         </h1>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-white/50">
+          <span data-tauri-drag-region className="text-[10px] text-white/50">
             {formatTokenCountCompact(usage?.total_tokens_today ?? null)}
           </span>
+          <button
+            type="button"
+            title={t("window.maximize")}
+            aria-label={t("window.maximize")}
+            onClick={() => void toggleMaximizeWindow()}
+            className="w-5 h-5 flex items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <svg viewBox="0 0 16 16" className="w-3 h-3" aria-hidden="true">
+              <rect
+                x="2.5"
+                y="2.5"
+                width="11"
+                height="11"
+                rx="1.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+              />
+            </svg>
+          </button>
           <button
             type="button"
             title={t("tray.dashboard")}
@@ -126,6 +161,7 @@ export function CompactWidget() {
             ? `${t("time.lastUpdated")}: ${formatRelative(usage.last_updated)}`
             : ""}
         </span>
+      </div>
       </div>
     </div>
   );
@@ -187,12 +223,13 @@ function ProviderRow({
           for token counts the number above already says everything. */}
       {quotaPct !== null && (
         <ProviderMeter
-          label={t("quota.used")}
-          percentage={quotaPct}
-          valueText={`${quotaPct.toFixed(0)}%`}
+          label={t("quota.remaining")}
+          percentage={remainingPct(quotaPct)}
+          valueText={`${remainingPct(quotaPct).toFixed(0)}%`}
+          danger="low"
         />
       )}
-      {quotaPct !== null && quotaPct >= 100 && quotaResetsAt && (
+      {quotaPct !== null && remainingPct(quotaPct) <= 0 && quotaResetsAt && (
         <span className="text-[9px] text-red-300/80 pl-4 truncate">
           {t("quota.resetsAt")}: {formatResetTime(quotaResetsAt)}
         </span>

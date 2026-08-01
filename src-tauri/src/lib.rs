@@ -188,6 +188,8 @@ pub fn run() {
         reconciliation: reconciliation.clone(),
     };
 
+    let tray_locale = config.locale.clone();
+
     // ─── 9. Build and run the Tauri application ─────────────────────────────
     tauri::Builder::default()
         .plugin(
@@ -237,7 +239,7 @@ pub fn run() {
             }
 
             // Build system tray with context menu
-            let _tray = tray::build_system_tray(app)?;
+            let _tray = tray::build_system_tray(app, &tray_locale)?;
 
             // Open the dashboard straight away when asked on the command line
             let args: Vec<String> = std::env::args().collect();
@@ -259,6 +261,52 @@ pub fn run() {
             .unwrap_or_else(|e| {
                 log::warn!("Failed to register global shortcut: {}", e);
             });
+
+            // Restore the placement the user left the widget in
+            if let Some(main_window) = app.get_webview_window("main") {
+                let saved = window_manager.current_config();
+                if saved.width > 0 && saved.height > 0 {
+                    let _ = main_window.set_size(tauri::LogicalSize::new(
+                        saved.width as f64,
+                        saved.height as f64,
+                    ));
+                }
+                if let Some(position) = window_manager
+                    .load_persisted_position()
+                    .or_else(|| window_manager.get_persisted_position())
+                {
+                    let _ = main_window
+                        .set_position(tauri::LogicalPosition::new(position.x, position.y));
+                }
+            }
+
+            // Remember where the user drags/resizes the widget to. The widget
+            // has no title bar, so this is the only record of its placement.
+            if let Some(main_window) = app.get_webview_window("main") {
+                let wm_geometry = window_manager.clone();
+                let geometry_window = main_window.clone();
+
+                main_window.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Moved(position) => {
+                        let scale = geometry_window.scale_factor().unwrap_or(1.0);
+                        let logical = position.to_logical::<i32>(scale);
+                        let monitor = geometry_window
+                            .current_monitor()
+                            .ok()
+                            .flatten()
+                            .and_then(|m| m.name().map(|n| n.to_string()));
+                        wm_geometry.persist_position(logical.x, logical.y, monitor);
+                    }
+                    tauri::WindowEvent::Resized(size) => {
+                        let scale = geometry_window.scale_factor().unwrap_or(1.0);
+                        let logical = size.to_logical::<u32>(scale);
+                        if logical.width > 0 && logical.height > 0 {
+                            wm_geometry.persist_size(logical.width, logical.height);
+                        }
+                    }
+                    _ => {}
+                });
+            }
 
             // Spawn fullscreen detection loop
             let wm_fullscreen = window_manager.clone();

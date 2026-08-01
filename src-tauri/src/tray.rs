@@ -186,40 +186,66 @@ pub fn is_autostart_enabled() -> Result<bool, AutostartError> {
     }
 }
 
-/// Build the system tray context menu and tray icon for the application.
-///
-/// Menu items:
-/// - Show Widget: shows and focuses the compact widget window
-/// - Dashboard: toggles the dashboard window
-/// - Collect Now: triggers immediate data collection
-/// - Language: TH/EN: switches locale
-/// - Settings: opens settings panel
-/// - Quit: exits the application
-///
-/// This function is intended to be called during Tauri app setup.
+/// Tray id, so the menu can be rebuilt when the language changes.
+pub const TRAY_ID: &str = "main-tray";
+
+/// Tray menu labels for the supported locales.
 #[cfg(not(test))]
-pub fn build_system_tray(
-    app: &tauri::App,
-) -> Result<tauri::tray::TrayIcon, Box<dyn std::error::Error>> {
-    use tauri::{
-        menu::{Menu, MenuItem},
-        tray::TrayIconBuilder,
-    };
+struct MenuLabels {
+    show_widget: &'static str,
+    dashboard: &'static str,
+    collect_now: &'static str,
+    language: &'static str,
+    settings: &'static str,
+    quit: &'static str,
+}
+
+#[cfg(not(test))]
+fn labels_for(locale: &str) -> MenuLabels {
+    if locale == "en" {
+        MenuLabels {
+            show_widget: "Show Widget",
+            dashboard: "Dashboard",
+            collect_now: "Collect Now",
+            language: "Language: ไทย / English",
+            settings: "Settings",
+            quit: "Quit",
+        }
+    } else {
+        MenuLabels {
+            show_widget: "แสดงวิดเจ็ต",
+            dashboard: "แดชบอร์ด",
+            collect_now: "เก็บข้อมูลตอนนี้",
+            language: "ภาษา: ไทย / English",
+            settings: "ตั้งค่า",
+            quit: "ออกจากโปรแกรม",
+        }
+    }
+}
+
+/// Build the tray menu in the given locale.
+#[cfg(not(test))]
+fn build_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+    locale: &str,
+) -> Result<tauri::menu::Menu<R>, Box<dyn std::error::Error>> {
+    use tauri::menu::{Menu, MenuItem};
+
+    let l = labels_for(locale);
 
     let show_widget =
-        MenuItem::with_id(app, menu_ids::SHOW_WIDGET, "Show Widget", true, None::<&str>)?;
+        MenuItem::with_id(manager, menu_ids::SHOW_WIDGET, l.show_widget, true, None::<&str>)?;
     let show_dashboard =
-        MenuItem::with_id(app, menu_ids::SHOW_DASHBOARD, "Dashboard", true, None::<&str>)?;
+        MenuItem::with_id(manager, menu_ids::SHOW_DASHBOARD, l.dashboard, true, None::<&str>)?;
     let collect_now =
-        MenuItem::with_id(app, menu_ids::COLLECT_NOW, "Collect Now", true, None::<&str>)?;
+        MenuItem::with_id(manager, menu_ids::COLLECT_NOW, l.collect_now, true, None::<&str>)?;
     let language =
-        MenuItem::with_id(app, menu_ids::LANGUAGE, "Language: TH/EN", true, None::<&str>)?;
-    let settings =
-        MenuItem::with_id(app, menu_ids::SETTINGS, "Settings", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, menu_ids::QUIT, "Quit", true, None::<&str>)?;
+        MenuItem::with_id(manager, menu_ids::LANGUAGE, l.language, true, None::<&str>)?;
+    let settings = MenuItem::with_id(manager, menu_ids::SETTINGS, l.settings, true, None::<&str>)?;
+    let quit = MenuItem::with_id(manager, menu_ids::QUIT, l.quit, true, None::<&str>)?;
 
-    let menu = Menu::with_items(
-        app,
+    Ok(Menu::with_items(
+        manager,
         &[
             &show_widget,
             &show_dashboard,
@@ -228,9 +254,41 @@ pub fn build_system_tray(
             &settings,
             &quit,
         ],
-    )?;
+    )?)
+}
 
-    let mut builder = TrayIconBuilder::new();
+/// Re-label the tray menu after the user switches language.
+#[cfg(not(test))]
+pub fn apply_locale(app: &tauri::AppHandle, locale: &str) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    match build_menu(app, locale) {
+        Ok(menu) => {
+            if let Err(e) = tray.set_menu(Some(menu)) {
+                log::warn!("Failed to apply tray menu locale: {}", e);
+            }
+        }
+        Err(e) => log::warn!("Failed to build tray menu for '{}': {}", locale, e),
+    }
+}
+
+/// Build the system tray context menu and tray icon for the application.
+///
+/// Menu items (localized): Show Widget, Dashboard, Collect Now, Language,
+/// Settings, Quit. Called once during Tauri app setup; use [`apply_locale`]
+/// afterwards when the user switches language.
+#[cfg(not(test))]
+pub fn build_system_tray(
+    app: &tauri::App,
+    locale: &str,
+) -> Result<tauri::tray::TrayIcon, Box<dyn std::error::Error>> {
+    use tauri::tray::TrayIconBuilder;
+
+    let menu = build_menu(app, locale)?;
+
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID);
 
     // Without an explicit icon the Shell_NotifyIcon entry renders blank on Windows,
     // which makes the tray-only widget unreachable. Reuse the bundled window icon.

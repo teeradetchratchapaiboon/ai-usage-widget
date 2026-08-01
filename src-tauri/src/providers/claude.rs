@@ -251,7 +251,7 @@ impl ProviderAdapter for ClaudeAdapter {
         let mut total_bytes: u64 = 0;
         let mut files_read: u32 = 0;
         let mut errors: Vec<String> = Vec::new();
-        let mut checkpoint = since.unwrap_or_else(|| Utc::now());
+        let mut checkpoint = since.unwrap_or_else(Utc::now);
 
         // Determine the checkpoint in milliseconds
         let last_sample = self.last_sample_time.lock().unwrap();
@@ -377,7 +377,7 @@ mod prop_tests_claude_checkpoint {
     use std::fs;
     use tempfile::TempDir;
 
-    /// **Validates: Requirements 14.4**
+    // **Validates: Requirements 14.4**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 

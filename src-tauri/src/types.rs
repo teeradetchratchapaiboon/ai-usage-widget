@@ -87,7 +87,7 @@ mod prop_tests_data_normalization {
     use chrono::{Duration, Utc};
     use proptest::prelude::*;
 
-    /// **Validates: Requirements 1.7, 13.2, 14.1**
+    // **Validates: Requirements 1.7, 13.2, 14.1**
 
     // ─── Strategies ─────────────────────────────────────────────────────────────
 

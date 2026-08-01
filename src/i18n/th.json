@@ -47,7 +47,8 @@
     "dailyTokens": "Token รายวัน",
     "label": "โควตา",
     "used": "โควตาที่ใช้",
-    "resetsAt": "รีเซ็ต"
+    "resetsAt": "รีเซ็ต",
+    "remaining": "คงเหลือ"
   },
   "notification": {
     "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",
@@ -93,5 +94,8 @@
     "connectionFailed": "ไม่สามารถเชื่อมต่อได้",
     "dataLoadFailed": "ไม่สามารถโหลดข้อมูลได้",
     "saveFailed": "ไม่สามารถบันทึกได้"
+  },
+  "window": {
+    "maximize": "ขยาย / ย่อกลับ"
   }
 }

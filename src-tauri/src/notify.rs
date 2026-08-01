@@ -81,8 +81,11 @@ impl NotificationEngine {
                     current_pct,
                     threshold_pct: self.critical_threshold,
                     message: format!(
-                        "{} quota usage is at {:.1}% (critical threshold: {:.0}%)",
-                        provider_name, current_pct, self.critical_threshold
+                        "{} has {:.0}% quota left ({:.1}% used, critical at {:.0}%)",
+                        provider_name,
+                        (100.0 - current_pct).max(0.0),
+                        current_pct,
+                        self.critical_threshold
                     ),
                 };
                 self.record_cooldown(provider_id, NotificationLevel::Critical);
@@ -97,8 +100,11 @@ impl NotificationEngine {
                     current_pct,
                     threshold_pct: self.warning_threshold,
                     message: format!(
-                        "{} quota usage is at {:.1}% (warning threshold: {:.0}%)",
-                        provider_name, current_pct, self.warning_threshold
+                        "{} has {:.0}% quota left ({:.1}% used, warning at {:.0}%)",
+                        provider_name,
+                        (100.0 - current_pct).max(0.0),
+                        current_pct,
+                        self.warning_threshold
                     ),
                 };
                 self.record_cooldown(provider_id, NotificationLevel::Warning);
@@ -358,7 +364,6 @@ mod tests {
 }
 
 /// Property-based tests for notification threshold accuracy.
-///
 /// **Validates: Requirements 10.1, 10.2, 10.3**
 #[cfg(test)]
 mod prop_tests_notification {
@@ -367,10 +372,6 @@ mod prop_tests_notification {
     use proptest::test_runner::Config;
 
     /// Strategy for generating valid percentage values (0.0..=100.0)
-    fn pct_strategy() -> impl Strategy<Value = f64> {
-        (0u32..=10000u32).prop_map(|v| v as f64 / 100.0)
-    }
-
     /// Strategy for generating provider IDs
     fn provider_id_strategy() -> impl Strategy<Value = String> {
         prop::string::string_regex("[a-z][a-z0-9_]{1,10}")

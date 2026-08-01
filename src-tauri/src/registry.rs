@@ -154,7 +154,7 @@ mod prop_tests_provider_isolation {
     use proptest::prelude::*;
     use proptest::test_runner::Config;
 
-    /// **Validates: Requirements 1.2, 16.1, 16.5**
+    // **Validates: Requirements 1.2, 16.1, 16.5**
 
     // --- Mock Providers ---
 
@@ -307,10 +307,8 @@ mod prop_tests_provider_isolation {
             let outcomes = registry.collect_all();
 
             // Check each success provider returned its events correctly
-            let mut outcome_idx = 0;
             for (i, (is_success, event_count)) in mix.iter().enumerate() {
-                let outcome = &outcomes[outcome_idx];
-                outcome_idx += 1;
+                let outcome = &outcomes[i];
 
                 if *is_success {
                     match outcome {

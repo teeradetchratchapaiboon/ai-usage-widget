@@ -158,7 +158,6 @@ mod tests {
 }
 
 /// Property-based tests for privacy hashing utilities.
-///
 /// **Validates: Requirements 11.1, 11.2, 11.3**
 #[cfg(test)]
 mod prop_tests_privacy {
@@ -169,7 +168,7 @@ mod prop_tests_privacy {
     proptest! {
         #![proptest_config(Config::with_cases(50))]
 
-        /// Property: Determinism - same input always produces the same hash.
+        // Property: Determinism - same input always produces the same hash.
         #[test]
         fn determinism(input in "\\PC{1,200}") {
             let hash1 = hash_string(&input);
@@ -190,7 +189,7 @@ mod prop_tests_privacy {
             prop_assert_eq!(&org1, &org2, "hash_org_id must be deterministic");
         }
 
-        /// Property: Length - all hashes are exactly 64 characters (SHA-256 hex).
+        // Property: Length - all hashes are exactly 64 characters (SHA-256 hex).
         #[test]
         fn length_is_64(input in "\\PC{0,500}") {
             prop_assert_eq!(hash_string(&input).len(), 64);
@@ -199,7 +198,7 @@ mod prop_tests_privacy {
             prop_assert_eq!(hash_org_id(&input).len(), 64);
         }
 
-        /// Property: Irreversibility (collision resistance) - different inputs produce different hashes.
+        // Property: Irreversibility (collision resistance) - different inputs produce different hashes.
         #[test]
         fn different_inputs_different_hashes(a in "\\PC{1,200}", b in "\\PC{1,200}") {
             prop_assume!(a != b);
@@ -208,7 +207,7 @@ mod prop_tests_privacy {
             prop_assert_ne!(hash_a, hash_b, "Different inputs should produce different hashes");
         }
 
-        /// Property: Non-empty output - any non-empty input produces a non-empty hash.
+        // Property: Non-empty output - any non-empty input produces a non-empty hash.
         #[test]
         fn non_empty_output(input in "\\PC{1,300}") {
             let result = hash_string(&input);
@@ -217,7 +216,7 @@ mod prop_tests_privacy {
                 "Hash output must be valid hex");
         }
 
-        /// Property: No raw data leakage - hash output does not contain any substring of the input (for inputs >= 4 chars).
+        // Property: No raw data leakage - hash output does not contain any substring of the input (for inputs >= 4 chars).
         #[test]
         fn no_raw_data_leakage(input in "[a-zA-Z0-9_/\\\\\\-\\.]{4,100}") {
             let hash = hash_string(&input);
