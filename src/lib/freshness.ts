@@ -64,8 +64,21 @@ export function formatAge(seconds: number | null): string | null {
   return minutes > 0 ? unit(minutes, "time.minuteShort") : i18n.t("freshness.justNow");
 }
 
-/** "Updated 2 days ago", or null when the age is unknown. */
+/**
+ * "Updated 2 days ago", or null when the age is unknown.
+ *
+ * Under a minute takes its own phrasing. `formatAge` returns "just now" there,
+ * which is already a complete adverbial — dropping it into "Updated {{age}}
+ * ago" produced "Updated just now ago", and the Thai template read no better.
+ */
 export function formatUpdatedAgo(ageSecs: number | null): string | null {
+  if (ageSecs === null || !Number.isFinite(ageSecs) || ageSecs < 0) {
+    return null;
+  }
+  if (ageSecs < 60) {
+    return i18n.t("freshness.updatedJustNow");
+  }
+
   const age = formatAge(ageSecs);
   return age === null ? null : i18n.t("freshness.updatedAgo", { age });
 }

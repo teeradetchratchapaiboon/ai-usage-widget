@@ -121,6 +121,7 @@
     "expired": "Window ended",
     "unknown": "Age unknown",
     "updatedAgo": "Updated {{age}} ago",
+    "updatedJustNow": "Updated just now",
     "lastKnown": "Last known value",
     "lastKnownAgo": "Last known, updated {{age}} ago",
     "waitingForReading": "Waiting for a new quota reading",
