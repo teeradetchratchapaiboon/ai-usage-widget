@@ -55,8 +55,10 @@ export interface ProviderStatus {
   quota_excess_pct: number | null;
   /** Tokens the provider itself reports for today */
   tokens_today: number | null;
-  /** When the quota window resets (RFC 3339), if the provider publishes one */
-  quota_resets_at: string | null;
+  /** When the five-hour window resets (RFC 3339), if known */
+  quota_fast_resets_at: string | null;
+  /** When the weekly window resets (RFC 3339), if known */
+  quota_weekly_resets_at: string | null;
 }
 
 /** Result of triggering an immediate collection cycle */

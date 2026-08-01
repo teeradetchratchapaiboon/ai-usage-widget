@@ -72,8 +72,14 @@ impl AppConfig {
         let content = std::fs::read_to_string(path)
             .map_err(|_| ConfigError::FileNotFound(path.display().to_string()))?;
 
-        serde_json::from_str(&content)
-            .map_err(|e| ConfigError::InvalidFormat(e.to_string()))
+        let mut config: Self = serde_json::from_str(&content)
+            .map_err(|e| ConfigError::InvalidFormat(e.to_string()))?;
+
+        if config.window.height == LEGACY_WIDGET_HEIGHT {
+            config.window.height = DEFAULT_WIDGET_HEIGHT;
+        }
+
+        Ok(config)
     }
 
     /// Load configuration from a JSON file, using defaults if the file doesn't exist.
@@ -134,13 +140,25 @@ impl Default for ClaudeConfig {
     }
 }
 
+/// Height a fresh widget opens at, in logical pixels.
+///
+/// Two providers now list a five-hour and a weekly window each, with their
+/// own reset times; the old 200 could not show that without scrolling.
+pub const DEFAULT_WIDGET_HEIGHT: u32 = 300;
+
+/// Height shipped before the per-window quota rows existed.
+///
+/// A config still carrying it was never resized by hand, so it adopts the new
+/// default instead of keeping a size that now clips.
+pub const LEGACY_WIDGET_HEIGHT: u32 = 200;
+
 /// Widget window configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowConfig {
     /// Window width in logical pixels (default: 340).
     pub width: u32,
 
-    /// Window height in logical pixels (default: 200).
+    /// Window height in logical pixels (default: 300).
     pub height: u32,
 
     /// Whether the widget is always on top (default: true).
@@ -160,7 +178,7 @@ impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             width: 340,
-            height: 200,
+            height: DEFAULT_WIDGET_HEIGHT,
             always_on_top: true,
             click_through: false,
             position_x: None,

@@ -42,7 +42,9 @@ export function ProviderMeter({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-white/70 w-16 truncate">{label}</span>
+      <span className="text-[10px] text-white/70 w-20 shrink-0 truncate" title={label}>
+        {label}
+      </span>
       <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
         {percentage !== null && (
           <div

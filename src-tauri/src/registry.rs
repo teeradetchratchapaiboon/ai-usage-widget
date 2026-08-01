@@ -110,11 +110,11 @@ impl ProviderRegistry {
                         quota: None,
                         context_window: None,
                         last_activity: None,
-                        quota_resets_at: None,
+                        quota_resets: Default::default(),
                     }
                 });
-                if summary.quota_resets_at.is_none() {
-                    summary.quota_resets_at = adapter.quota_resets_at();
+                if summary.quota_resets.is_empty() {
+                    summary.quota_resets = adapter.quota_resets();
                 }
                 summary
             })
@@ -222,7 +222,7 @@ mod prop_tests_provider_isolation {
                 quota: None,
                 context_window: Some(128_000),
                 last_activity: Some(Utc::now()),
-                quota_resets_at: None,
+                quota_resets: Default::default(),
             })
         }
         fn last_checkpoint(&self) -> Option<DateTime<Utc>> {

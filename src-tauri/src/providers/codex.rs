@@ -85,12 +85,71 @@ struct RateLimitWindow {
 /// Serialized into the provider's persisted state: the values only appear
 /// while parsing new log lines, so without persistence a restart would show no
 /// quota until the next Codex session writes to disk.
+/// Fields default so a snapshot written by an older build still loads.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RateLimitSnapshot {
-    pub primary_used_pct: Option<f64>,
-    pub secondary_used_pct: Option<f64>,
-    pub resets_at: Option<DateTime<Utc>>,
-    pub window_minutes: Option<u64>,
+    #[serde(default)]
+    pub fast_used_pct: Option<f64>,
+    #[serde(default)]
+    pub fast_resets_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub weekly_used_pct: Option<f64>,
+    #[serde(default)]
+    pub weekly_resets_at: Option<DateTime<Utc>>,
+}
+
+/// Longest window still counted as the short rolling limit, in minutes.
+const FAST_WINDOW_MAX_MINUTES: u64 = 24 * 60;
+
+impl RateLimitSnapshot {
+    /// Fold one window into the snapshot, filing it by the length Codex
+    /// reports rather than by the slot it arrived in.
+    ///
+    /// `primary` is not a fixed window: it carries the 300-minute limit
+    /// normally, but Codex promotes the weekly limit into that slot once that
+    /// is the binding one. Trusting the slot labels a weekly reset as a
+    /// five-hour one — backwards for someone deciding whether to wait.
+    fn apply(&mut self, window: &RateLimitWindow, is_primary: bool) {
+        let Some(pct) = window.used_percent else {
+            return;
+        };
+        let resets_at = window
+            .resets_at
+            .and_then(|ts| DateTime::from_timestamp(ts, 0));
+
+        let is_fast = match window.window_minutes {
+            Some(minutes) => minutes <= FAST_WINDOW_MAX_MINUTES,
+            // No length published: fall back to what the slot conventionally means
+            None => is_primary,
+        };
+        // A guess must not displace a window that stated its own length
+        let known_length = window.window_minutes.is_some();
+
+        if is_fast {
+            if known_length || self.fast_used_pct.is_none() {
+                self.fast_used_pct = Some(pct);
+                self.fast_resets_at = resets_at;
+            }
+        } else if known_length || self.weekly_used_pct.is_none() {
+            self.weekly_used_pct = Some(pct);
+            self.weekly_resets_at = resets_at;
+        }
+    }
+
+    /// Apply both slots of one `rate_limits` object.
+    fn apply_limits(&mut self, limits: &RateLimits) {
+        if let Some(primary) = limits.primary.as_ref() {
+            self.apply(primary, true);
+        }
+        if let Some(secondary) = limits.secondary.as_ref() {
+            self.apply(secondary, false);
+        }
+    }
+
+    /// True once either window has reported something.
+    fn has_data(&self) -> bool {
+        self.fast_used_pct.is_some() || self.weekly_used_pct.is_some()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,8 +258,7 @@ impl CodexAdapter {
         const TAIL_BYTES: u64 = 256 * 1024;
 
         {
-            let snapshot = self.rate_limits.lock().unwrap();
-            if snapshot.primary_used_pct.is_some() || snapshot.secondary_used_pct.is_some() {
+            if self.rate_limits.lock().unwrap().has_data() {
                 return;
             }
         }
@@ -242,27 +300,15 @@ impl CodexAdapter {
                 continue;
             };
 
-            if let Some(primary) = limits.primary.as_ref() {
-                if let Some(pct) = primary.used_percent {
-                    found.primary_used_pct = Some(pct);
-                    found.window_minutes = primary.window_minutes;
-                    found.resets_at = primary
-                        .resets_at
-                        .and_then(|ts| DateTime::from_timestamp(ts, 0));
-                }
-            }
-            if let Some(secondary) = limits.secondary.as_ref() {
-                if let Some(pct) = secondary.used_percent {
-                    found.secondary_used_pct = Some(pct);
-                }
-            }
+            found.apply_limits(&limits);
         }
 
-        if found.primary_used_pct.is_some() || found.secondary_used_pct.is_some() {
+        if found.has_data() {
             log::info!(
-                "Primed Codex rate limits from {}: primary={:?}%",
+                "Primed Codex rate limits from {}: 5h={:?}% weekly={:?}%",
                 path.display(),
-                found.primary_used_pct
+                found.fast_used_pct,
+                found.weekly_used_pct
             );
             *self.rate_limits.lock().unwrap() = found;
         }
@@ -356,21 +402,7 @@ impl CodexAdapter {
                     // several limit families and nulls the windows that do not
                     // apply, so only non-null windows update the snapshot.
                     if let Some(ref limits) = tc.rate_limits {
-                        let mut snapshot = self.rate_limits.lock().unwrap();
-                        if let Some(primary) = limits.primary.as_ref() {
-                            if let Some(pct) = primary.used_percent {
-                                snapshot.primary_used_pct = Some(pct);
-                                snapshot.window_minutes = primary.window_minutes;
-                                snapshot.resets_at = primary
-                                    .resets_at
-                                    .and_then(|ts| DateTime::from_timestamp(ts, 0));
-                            }
-                        }
-                        if let Some(secondary) = limits.secondary.as_ref() {
-                            if let Some(pct) = secondary.used_percent {
-                                snapshot.secondary_used_pct = Some(pct);
-                            }
-                        }
+                        self.rate_limits.lock().unwrap().apply_limits(limits);
                     }
 
                     if let Some(ref info) = tc.info {
@@ -396,12 +428,10 @@ impl CodexAdapter {
                                 context_window: info.model_context_window,
                                 quota: {
                                     let snapshot = self.rate_limits.lock().unwrap();
-                                    if snapshot.primary_used_pct.is_some()
-                                        || snapshot.secondary_used_pct.is_some()
-                                    {
+                                    if snapshot.has_data() {
                                         Some(crate::types::QuotaUsage {
-                                            fast_hours_pct: snapshot.primary_used_pct,
-                                            standard_pct: snapshot.secondary_used_pct,
+                                            fast_hours_pct: snapshot.fast_used_pct,
+                                            standard_pct: snapshot.weekly_used_pct,
                                             excess_pct: None,
                                             daily_tokens: None,
                                         })
@@ -604,11 +634,10 @@ impl ProviderAdapter for CodexAdapter {
 
     fn get_current_summary(&self) -> Result<ProviderSummary, CollectionError> {
         let snapshot = self.rate_limits.lock().unwrap().clone();
-        let quota = if snapshot.primary_used_pct.is_some() || snapshot.secondary_used_pct.is_some()
-        {
+        let quota = if snapshot.has_data() {
             Some(crate::types::QuotaUsage {
-                fast_hours_pct: snapshot.primary_used_pct,
-                standard_pct: snapshot.secondary_used_pct,
+                fast_hours_pct: snapshot.fast_used_pct,
+                standard_pct: snapshot.weekly_used_pct,
                 excess_pct: None,
                 daily_tokens: None,
             })
@@ -625,12 +654,19 @@ impl ProviderAdapter for CodexAdapter {
             quota,
             context_window: None,
             last_activity: *self.last_checkpoint.lock().unwrap(),
-            quota_resets_at: snapshot.resets_at,
+            quota_resets: crate::provider::QuotaResets {
+                fast_hours: snapshot.fast_resets_at,
+                weekly: snapshot.weekly_resets_at,
+            },
         })
     }
 
-    fn quota_resets_at(&self) -> Option<DateTime<Utc>> {
-        self.rate_limits.lock().unwrap().resets_at
+    fn quota_resets(&self) -> crate::provider::QuotaResets {
+        let snapshot = self.rate_limits.lock().unwrap();
+        crate::provider::QuotaResets {
+            fast_hours: snapshot.fast_resets_at,
+            weekly: snapshot.weekly_resets_at,
+        }
     }
 
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
@@ -647,9 +683,7 @@ impl ProviderAdapter for CodexAdapter {
                 .map(|(path, offset)| (path.to_string_lossy().to_string(), *offset))
                 .collect(),
             checkpoint: *self.last_checkpoint.lock().unwrap(),
-            metadata: if snapshot.primary_used_pct.is_some()
-                || snapshot.secondary_used_pct.is_some()
-            {
+            metadata: if snapshot.has_data() {
                 serde_json::to_string(&snapshot).ok()
             } else {
                 None
@@ -746,6 +780,66 @@ mod rate_limit_tests {
     use super::*;
     use std::fs;
 
+    /// Write one session log holding a single `token_count` line.
+    fn adapter_for(dir: &std::path::Path, rate_limits: &str) -> CodexAdapter {
+        let day = dir.join("2026").join("07").join("30");
+        fs::create_dir_all(&day).unwrap();
+        let line = format!(
+            r#"{{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":10,"output_tokens":5,"total_tokens":15}},"model_context_window":258400}},"rate_limits":{}}}}}"#,
+            rate_limits
+        );
+        fs::write(day.join("rollout-test.jsonl"), format!("{}\n", line)).unwrap();
+
+        CodexAdapter::new(&CodexConfig {
+            sessions_dir: dir.to_path_buf(),
+            state_db_path: dir.join("missing.sqlite"),
+            enabled: true,
+        })
+    }
+
+    #[test]
+    fn test_splits_five_hour_and_weekly_windows() {
+        // The usual shape: both windows present, each stating its own length.
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = adapter_for(
+            dir.path(),
+            r#"{"limit_id":"codex","primary":{"used_percent":20.0,"window_minutes":300,"resets_at":1783893498},"secondary":{"used_percent":36.0,"window_minutes":10080,"resets_at":1784362660}}"#,
+        );
+        adapter.collect(None).unwrap();
+
+        let quota = adapter.get_current_summary().unwrap().quota.unwrap();
+        assert_eq!(quota.fast_hours_pct, Some(20.0));
+        assert_eq!(quota.standard_pct, Some(36.0));
+
+        let resets = adapter.quota_resets();
+        assert_eq!(
+            resets.fast_hours.map(|dt| dt.timestamp()),
+            Some(1783893498)
+        );
+        assert_eq!(resets.weekly.map(|dt| dt.timestamp()), Some(1784362660));
+    }
+
+    #[test]
+    fn test_weekly_window_in_primary_slot_is_not_read_as_five_hour() {
+        // Once the weekly limit is the binding one Codex moves it into
+        // `primary`. Going by the slot would promise a reset in hours when the
+        // wait is really days.
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = adapter_for(
+            dir.path(),
+            r#"{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677},"secondary":null}"#,
+        );
+        adapter.collect(None).unwrap();
+
+        let quota = adapter.get_current_summary().unwrap().quota.unwrap();
+        assert_eq!(quota.standard_pct, Some(100.0), "weekly window");
+        assert_eq!(quota.fast_hours_pct, None, "no five-hour window reported");
+
+        let resets = adapter.quota_resets();
+        assert_eq!(resets.weekly.map(|dt| dt.timestamp()), Some(1785922677));
+        assert_eq!(resets.fast_hours, None);
+    }
+
     #[test]
     fn test_parses_rate_limits_from_token_count() {
         // Codex reports plan limits next to the token counts; a full weekly
@@ -770,14 +864,16 @@ mod rate_limit_tests {
             .quota
             .as_ref()
             .expect("event should carry the quota");
-        assert_eq!(quota.fast_hours_pct, Some(100.0));
-        assert_eq!(quota.standard_pct, Some(42.5));
+        // primary states 10080 minutes, so it is the weekly window; the
+        // secondary states no length and must not displace it.
+        assert_eq!(quota.standard_pct, Some(100.0));
+        assert_eq!(quota.fast_hours_pct, None);
 
         let summary = adapter.get_current_summary().unwrap();
         let summary_quota = summary.quota.expect("summary should carry the quota");
-        assert_eq!(summary_quota.fast_hours_pct, Some(100.0));
+        assert_eq!(summary_quota.standard_pct, Some(100.0));
         assert_eq!(
-            adapter.quota_resets_at().map(|dt| dt.timestamp()),
+            adapter.quota_resets().weekly.map(|dt| dt.timestamp()),
             Some(1785922677)
         );
     }
@@ -810,7 +906,7 @@ mod rate_limit_tests {
 
         let summary = adapter.get_current_summary().unwrap();
         assert_eq!(
-            summary.quota.and_then(|q| q.fast_hours_pct),
+            summary.quota.and_then(|q| q.standard_pct),
             Some(100.0),
             "a null window must not erase the last known percentage"
         );
@@ -843,9 +939,9 @@ mod rate_limit_tests {
         restarted.restore_state(&state);
 
         let summary = restarted.get_current_summary().unwrap();
-        assert_eq!(summary.quota.and_then(|q| q.fast_hours_pct), Some(100.0));
+        assert_eq!(summary.quota.and_then(|q| q.standard_pct), Some(100.0));
         assert_eq!(
-            restarted.quota_resets_at().map(|dt| dt.timestamp()),
+            restarted.quota_resets().weekly.map(|dt| dt.timestamp()),
             Some(1785922677)
         );
     }

@@ -80,7 +80,7 @@ impl WindowManager {
         &self.dashboard_label
     }
 
-    /// Returns the logical size for the compact widget (340x200).
+    /// Returns the logical size for the compact widget.
     /// Uses LogicalSize for DPI-independent rendering.
     pub fn compact_widget_size(&self) -> (u32, u32) {
         let cfg = self.config.lock().unwrap();
@@ -446,7 +446,10 @@ mod tests {
         assert_eq!(wm.dashboard_label(), "dashboard");
         assert!(!wm.is_dashboard_open());
         assert!(wm.is_always_on_top());
-        assert_eq!(wm.compact_widget_size(), (340, 200));
+        assert_eq!(
+            wm.compact_widget_size(),
+            (340, crate::config::DEFAULT_WIDGET_HEIGHT)
+        );
     }
 
     #[test]
@@ -543,7 +546,7 @@ mod tests {
         let wm = WindowManager::new(WindowConfig::default(), &test_data_dir());
         let cfg = wm.current_config();
         assert_eq!(cfg.width, 340);
-        assert_eq!(cfg.height, 200);
+        assert_eq!(cfg.height, crate::config::DEFAULT_WIDGET_HEIGHT);
         assert!(cfg.always_on_top);
         assert!(!cfg.click_through);
     }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -94,6 +94,47 @@ impl ClaudeAdapter {
         let secs = ms / 1000;
         let nsecs = ((ms % 1000) * 1_000_000) as u32;
         Utc.timestamp_opt(secs, nsecs).single()
+    }
+
+    /// Work out when each quota window rolls over.
+    ///
+    /// Claude publishes percentages only — no reset timestamps — so the times
+    /// are read off the history instead: a counter that falls sharply is a
+    /// window that just rolled over, and the next one lands a window-length
+    /// later. A reset already in the past means the drop is too old to place
+    /// the current window, so nothing is claimed.
+    fn infer_quota_resets(samples: &[UsageSample]) -> crate::provider::QuotaResets {
+        crate::provider::QuotaResets {
+            fast_hours: Self::infer_reset(samples, |s| s.u.fh, Duration::hours(5)),
+            weekly: Self::infer_reset(samples, |s| s.u.sd, Duration::days(7)),
+        }
+    }
+
+    /// Percentage-point fall that counts as a window rolling over rather than
+    /// as the ordinary jitter of a rounded percentage.
+    const RESET_DROP_THRESHOLD: f64 = 10.0;
+
+    /// Find the most recent rollover of one counter and project it forward.
+    fn infer_reset<F>(
+        samples: &[UsageSample],
+        value: F,
+        window: Duration,
+    ) -> Option<DateTime<Utc>>
+    where
+        F: Fn(&UsageSample) -> Option<f64>,
+    {
+        let started_at = samples
+            .windows(2)
+            .rev()
+            .find_map(|pair| match (value(&pair[0]), value(&pair[1])) {
+                (Some(before), Some(after)) if before - after >= Self::RESET_DROP_THRESHOLD => {
+                    Some(pair[1].t)
+                }
+                _ => None,
+            })?;
+
+        let resets_at = Self::ms_to_datetime(started_at)? + window;
+        (resets_at > Utc::now()).then_some(resets_at)
     }
 
     /// Parse plan-usage-history.json and return usage events newer than the checkpoint.
@@ -321,6 +362,7 @@ impl ProviderAdapter for ClaudeAdapter {
     fn get_current_summary(&self) -> Result<ProviderSummary, CollectionError> {
         let mut quota = None;
         let mut tokens_today = None;
+        let mut quota_resets = crate::provider::QuotaResets::default();
 
         // Try to read current quota from plan-usage-history.json
         let plan_path = self.data_dir.join("plan-usage-history.json");
@@ -336,6 +378,7 @@ impl ProviderAdapter for ClaudeAdapter {
                                 daily_tokens: None,
                             });
                         }
+                        quota_resets = Self::infer_quota_resets(&history.samples);
                     }
                 }
             }
@@ -360,8 +403,19 @@ impl ProviderAdapter for ClaudeAdapter {
             quota,
             context_window: None,
             last_activity: None,
-            quota_resets_at: None,
+            quota_resets,
         })
+    }
+
+    fn quota_resets(&self) -> crate::provider::QuotaResets {
+        let plan_path = self.data_dir.join("plan-usage-history.json");
+        let Ok(content) = std::fs::read_to_string(&plan_path) else {
+            return crate::provider::QuotaResets::default();
+        };
+        match serde_json::from_str::<PlanUsageHistory>(&content) {
+            Ok(history) if history.version == 2 => Self::infer_quota_resets(&history.samples),
+            _ => crate::provider::QuotaResets::default(),
+        }
     }
 
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
@@ -556,6 +610,59 @@ mod tests {
 
     fn create_test_dir() -> TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    /// Build a plan-usage-history.json from (minutes-ago, fh, sd) triples.
+    fn history_json(samples: &[(i64, f64, f64)]) -> String {
+        let now_ms = Utc::now().timestamp_millis();
+        let entries: Vec<String> = samples
+            .iter()
+            .map(|(mins_ago, fh, sd)| {
+                format!(
+                    r#"{{"t":{},"org":"abc","u":{{"fh":{},"sd":{}}}}}"#,
+                    now_ms - mins_ago * 60_000,
+                    fh,
+                    sd
+                )
+            })
+            .collect();
+        format!(r#"{{"version":2,"samples":[{}]}}"#, entries.join(","))
+    }
+
+    #[test]
+    fn test_infers_reset_times_from_a_counter_dropping() {
+        // Claude publishes percentages only, so the five-hour window is placed
+        // by the last time the counter fell: it restarted 60 minutes ago, so
+        // it rolls over again in about four hours.
+        let dir = tempfile::tempdir().unwrap();
+        let json = history_json(&[(180, 40.0, 50.0), (60, 3.0, 51.0), (5, 22.0, 52.0)]);
+        fs::write(dir.path().join("plan-usage-history.json"), json).unwrap();
+
+        let resets = ClaudeAdapter::new(dir.path().to_path_buf()).quota_resets();
+        let minutes_out = (resets.fast_hours.expect("five-hour reset") - Utc::now()).num_minutes();
+        assert!(
+            (235..=245).contains(&minutes_out),
+            "expected ~240 minutes out, got {}",
+            minutes_out
+        );
+        // `sd` only ever climbed here, so no weekly rollover can be placed
+        assert_eq!(resets.weekly, None);
+    }
+
+    #[test]
+    fn test_reset_older_than_its_window_is_not_reported() {
+        // The drop is six hours old: the window it started has already rolled
+        // over again, so its reset time would be a lie.
+        let dir = tempfile::tempdir().unwrap();
+        let json = history_json(&[(400, 90.0, 10.0), (360, 1.0, 11.0)]);
+        fs::write(dir.path().join("plan-usage-history.json"), json).unwrap();
+
+        assert_eq!(
+            ClaudeAdapter::new(dir.path().to_path_buf())
+                .quota_resets()
+                .fast_hours,
+            None
+        );
     }
 
     #[test]

@@ -25,6 +25,26 @@ pub struct CollectionResult {
     pub source_metadata: SourceMetadata,
 }
 
+/// When each quota window rolls over, for providers that publish it.
+///
+/// Both vendors meter two windows independently — a short rolling one and a
+/// long one — and a single "resets at" cannot describe them: hitting the
+/// weekly cap says nothing about when the next five hours open up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuotaResets {
+    /// Short rolling window: Codex's 300-minute limit, Claude's `fh`.
+    pub fast_hours: Option<DateTime<Utc>>,
+    /// Long window: Codex's 10080-minute limit, Claude's `sd`.
+    pub weekly: Option<DateTime<Utc>>,
+}
+
+impl QuotaResets {
+    /// True when neither window published a reset time.
+    pub fn is_empty(&self) -> bool {
+        self.fast_hours.is_none() && self.weekly.is_none()
+    }
+}
+
 /// Summary of a provider's current state for display in the widget.
 #[derive(Debug, Clone)]
 pub struct ProviderSummary {
@@ -44,8 +64,8 @@ pub struct ProviderSummary {
     pub context_window: Option<u64>,
     /// Timestamp of the most recent activity from this provider.
     pub last_activity: Option<DateTime<Utc>>,
-    /// When the quota window resets, for providers that publish one.
-    pub quota_resets_at: Option<DateTime<Utc>>,
+    /// When each quota window resets, for providers that publish it.
+    pub quota_resets: QuotaResets,
 }
 
 /// Trait defining the interface for data collection adapters.
@@ -75,9 +95,9 @@ pub trait ProviderAdapter: Send + Sync {
     /// Returns the timestamp of the last successful collection checkpoint.
     fn last_checkpoint(&self) -> Option<DateTime<Utc>>;
 
-    /// When the provider's quota window resets, if it publishes one.
-    fn quota_resets_at(&self) -> Option<DateTime<Utc>> {
-        None
+    /// When the provider's quota windows reset, if it publishes them.
+    fn quota_resets(&self) -> QuotaResets {
+        QuotaResets::default()
     }
 
     /// Export the adapter's incremental-collection state so it can be persisted.

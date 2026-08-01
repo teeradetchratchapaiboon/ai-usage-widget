@@ -43,8 +43,8 @@
     "cachedInput": "Cached Input"
   },
   "quota": {
-    "fastHours": "Fast Hours",
-    "standard": "Standard",
+    "fastHours": "5-hour",
+    "standard": "Weekly",
     "excess": "Excess",
     "dailyTokens": "Daily Tokens",
     "label": "Quota",

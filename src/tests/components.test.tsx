@@ -92,7 +92,8 @@ const fixtureProviders: ProviderStatus[] = [
     quota_standard_pct: null,
     quota_excess_pct: null,
     tokens_today: null,
-    quota_resets_at: null,
+    quota_fast_resets_at: null,
+    quota_weekly_resets_at: null,
   },
   {
     provider_id: "claude",
@@ -105,7 +106,8 @@ const fixtureProviders: ProviderStatus[] = [
     quota_standard_pct: 41.0,
     quota_excess_pct: null,
     tokens_today: 29036,
-    quota_resets_at: null,
+    quota_fast_resets_at: new Date(Date.now() + 2 * 3600000).toISOString(),
+    quota_weekly_resets_at: new Date(Date.now() + 3 * 86400000).toISOString(),
   },
 ];
 

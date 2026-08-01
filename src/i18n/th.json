@@ -43,8 +43,8 @@
     "cachedInput": "Token แคช"
   },
   "quota": {
-    "fastHours": "ชั่วโมงเร็ว",
-    "standard": "มาตรฐาน",
+    "fastHours": "5 ชม.",
+    "standard": "รายสัปดาห์",
     "excess": "เกินโควตา",
     "dailyTokens": "Token รายวัน",
     "label": "โควตา",

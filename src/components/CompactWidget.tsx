@@ -19,19 +19,61 @@ import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
 import { LoadingSkeleton } from "./LoadingSkeleton";
 
-/** Highest quota dimension a provider reports, or null if it publishes none. */
-function highestQuota(provider: {
+/** One metered quota window, ready to render. */
+interface QuotaWindow {
+  /** i18n key for the window's name. */
+  labelKey: string;
+  /** Percentage consumed, as the provider reports it. */
+  usedPct: number;
+  /** When this window rolls over (RFC 3339), if the provider says. */
+  resetsAt: string | null;
+}
+
+/**
+ * The quota windows a provider meters, in the order they matter.
+ *
+ * Both vendors cap a short rolling window and a long one independently, and
+ * they run out at different times — a full weekly limit says nothing about
+ * whether the next five hours are usable, so they are never merged.
+ */
+function quotaWindows(provider: {
   quota_fast_pct: number | null;
   quota_standard_pct: number | null;
   quota_excess_pct: number | null;
-}): number | null {
-  const values = [
-    provider.quota_fast_pct,
-    provider.quota_standard_pct,
-    provider.quota_excess_pct,
-  ].filter((v): v is number => typeof v === "number");
+  quota_fast_resets_at: string | null;
+  quota_weekly_resets_at: string | null;
+}): QuotaWindow[] {
+  const windows: QuotaWindow[] = [];
 
-  return values.length > 0 ? Math.max(...values) : null;
+  if (typeof provider.quota_fast_pct === "number") {
+    windows.push({
+      labelKey: "quota.fastHours",
+      usedPct: provider.quota_fast_pct,
+      resetsAt: provider.quota_fast_resets_at,
+    });
+  }
+  if (typeof provider.quota_standard_pct === "number") {
+    windows.push({
+      labelKey: "quota.standard",
+      usedPct: provider.quota_standard_pct,
+      resetsAt: provider.quota_weekly_resets_at,
+    });
+  }
+  if (typeof provider.quota_excess_pct === "number") {
+    windows.push({
+      labelKey: "quota.excess",
+      usedPct: provider.quota_excess_pct,
+      resetsAt: null,
+    });
+  }
+
+  return windows;
+}
+
+/** Most-consumed window, for the one-line collapsed summary. */
+function highestQuota(provider: Parameters<typeof quotaWindows>[0]): number | null {
+  const windows = quotaWindows(provider);
+  return windows.length > 0 ? Math.max(...windows.map((w) => w.usedPct)) : null;
 }
 
 /** Quota left, from the consumed percentage the providers report. */
@@ -194,8 +236,7 @@ export function CompactWidget() {
               isAvailable={provider.is_available}
               totalTokensToday={providerUsage?.total_tokens_today ?? null}
               lastActivity={providerUsage?.last_activity ?? null}
-              quotaPct={highestQuota(provider)}
-              quotaResetsAt={provider.quota_resets_at}
+              windows={quotaWindows(provider)}
             />
           );
         })}
@@ -231,10 +272,8 @@ interface ProviderRowProps {
   isAvailable: boolean;
   totalTokensToday: number | null;
   lastActivity: string | null;
-  /** Highest quota dimension the provider reports, in percent. */
-  quotaPct: number | null;
-  /** When that quota window resets (RFC 3339), if published. */
-  quotaResetsAt: string | null;
+  /** Every quota window this provider meters, each with its own reset. */
+  windows: QuotaWindow[];
 }
 
 function ProviderRow({
@@ -243,8 +282,7 @@ function ProviderRow({
   isAvailable,
   totalTokensToday,
   lastActivity,
-  quotaPct,
-  quotaResetsAt,
+  windows,
 }: ProviderRowProps) {
   const { t } = useTranslation();
 
@@ -275,21 +313,30 @@ function ProviderRow({
         <span className="text-[11px] text-white/90 flex-1 truncate">{name}</span>
         <span className="text-[10px] text-white/70 shrink-0">{tokenText}</span>
       </div>
-      {/* The meter only carries information when the provider reports a quota;
-          for token counts the number above already says everything. */}
-      {quotaPct !== null && (
-        <ProviderMeter
-          label={t("quota.remaining")}
-          percentage={remainingPct(quotaPct)}
-          valueText={`${remainingPct(quotaPct).toFixed(0)}%`}
-          danger="low"
-        />
-      )}
-      {quotaPct !== null && remainingPct(quotaPct) <= 0 && quotaResetsAt && (
-        <span className="text-[9px] text-red-300/80 pl-4 truncate">
-          {t("quota.resetsAt")}: {formatResetTime(quotaResetsAt)}
-        </span>
-      )}
+      {/* One meter per window: they run out independently, and which one is
+          binding is the whole question when the widget says 0%. */}
+      {windows.map((window) => {
+        const left = remainingPct(window.usedPct);
+        return (
+          <div key={window.labelKey} className="flex flex-col">
+            <ProviderMeter
+              label={t(window.labelKey)}
+              percentage={left}
+              valueText={`${left.toFixed(0)}%`}
+              danger="low"
+            />
+            {window.resetsAt && (
+              <span
+                className={`text-[9px] pl-4 truncate ${
+                  left <= 0 ? "text-red-300/80" : "text-white/40"
+                }`}
+              >
+                {t("quota.resetsAt")}: {formatResetTime(window.resetsAt)}
+              </span>
+            )}
+          </div>
+        );
+      })}
       {lastActivity && (
         <span className="text-[9px] text-white/40 pl-4 truncate">
           {formatRelative(lastActivity)}
