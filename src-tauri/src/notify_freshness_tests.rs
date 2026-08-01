@@ -22,7 +22,11 @@ fn reading(freshness: Freshness, used_pct: f64, age_secs: Option<i64>) -> QuotaR
 #[test]
 fn test_a_fresh_reading_notifies_normally() {
     let mut engine = NotificationEngine::new();
-    let out = engine.check_threshold("codex", "Codex Desktop", reading(Freshness::Fresh, 95.0, Some(60)));
+    let out = engine.check_threshold(
+        "codex",
+        "Codex Desktop",
+        reading(Freshness::Fresh, 95.0, Some(60)),
+    );
 
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].level, NotificationLevel::Critical);
@@ -74,7 +78,11 @@ fn test_a_stale_reading_never_notifies() {
 #[test]
 fn test_an_expired_reading_never_notifies() {
     let mut engine = NotificationEngine::new();
-    let out = engine.check_threshold("codex", "Codex", reading(Freshness::Expired, 100.0, Some(30)));
+    let out = engine.check_threshold(
+        "codex",
+        "Codex",
+        reading(Freshness::Expired, 100.0, Some(30)),
+    );
 
     assert!(out.is_empty());
 }
@@ -111,11 +119,19 @@ fn test_the_gate_does_not_consume_the_cooldown() {
     let mut engine = NotificationEngine::new();
 
     assert!(engine
-        .check_threshold("codex", "Codex", reading(Freshness::Stale, 95.0, Some(99_999)))
+        .check_threshold(
+            "codex",
+            "Codex",
+            reading(Freshness::Stale, 95.0, Some(99_999))
+        )
         .is_empty());
 
     let out = engine.check_threshold("codex", "Codex", reading(Freshness::Fresh, 95.0, Some(10)));
-    assert_eq!(out.len(), 1, "the fresh reading must still be allowed to fire");
+    assert_eq!(
+        out.len(),
+        1,
+        "the fresh reading must still be allowed to fire"
+    );
 }
 
 #[test]

@@ -265,8 +265,7 @@ impl CodexAdapter {
                                 if let Ok(jsonl_files) = fs::read_dir(&day_path) {
                                     for f in jsonl_files.flatten() {
                                         let p = f.path();
-                                        if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
-                                        {
+                                        if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                                             files.push(p);
                                         }
                                     }
@@ -391,10 +390,7 @@ impl CodexAdapter {
         let session_hash = hash_string(session_id);
 
         // Derive project hash from parent directory path
-        let project_hash = path
-            .parent()
-            .and_then(|p| p.to_str())
-            .map(hash_string);
+        let project_hash = path.parent().and_then(|p| p.to_str()).map(hash_string);
 
         for line_result in reader.lines() {
             let line = match line_result {
@@ -433,16 +429,13 @@ impl CodexAdapter {
             let timestamp = record_observed_at.unwrap_or_else(Utc::now);
 
             match (&parsed.line_type, &parsed.payload) {
-                (Some(t), Some(JsonlPayload::SessionMeta(meta)))
-                    if t == "session_meta" =>
-                {
+                (Some(t), Some(JsonlPayload::SessionMeta(meta))) if t == "session_meta" => {
                     if let Some(ref model) = meta.model {
                         current_model = Some(model.clone());
                     }
                 }
                 (Some(t), Some(JsonlPayload::TokenCount(tc)))
-                    if t == "event_msg"
-                        && tc.payload_type.as_deref() == Some("token_count") =>
+                    if t == "event_msg" && tc.payload_type.as_deref() == Some("token_count") =>
                 {
                     // Remember the newest rate limit values. Codex reports
                     // several limit families and nulls the windows that do not
@@ -517,10 +510,7 @@ impl CodexAdapter {
     /// Read thread summaries from state_5.sqlite with lock retry logic.
     /// Retries 3 times with exponential backoff (100ms, 200ms, 400ms).
     /// Falls back to empty vec if database is locked or unavailable.
-    fn read_thread_summaries(
-        &self,
-        since: Option<DateTime<Utc>>,
-    ) -> Vec<RawUsageEvent> {
+    fn read_thread_summaries(&self, since: Option<DateTime<Utc>>) -> Vec<RawUsageEvent> {
         if !self.state_db_path.exists() {
             return Vec::new();
         }
@@ -550,10 +540,7 @@ impl CodexAdapter {
     }
 
     /// Attempt to read threads from the SQLite database.
-    fn try_read_threads(
-        &self,
-        since: Option<DateTime<Utc>>,
-    ) -> Result<Vec<RawUsageEvent>, String> {
+    fn try_read_threads(&self, since: Option<DateTime<Utc>>) -> Result<Vec<RawUsageEvent>, String> {
         // Use rusqlite-style synchronous access via sqlite3
         // Since sqlx is async and we need sync here, use a minimal
         // sqlite3 connection via the sqlite3 bundled in sqlx.
@@ -831,7 +818,6 @@ fn read_thread_rows(
     Ok(result)
 }
 
-
 #[cfg(test)]
 #[path = "codex_quota_tests.rs"]
 mod quota_observation_tests;
@@ -873,10 +859,7 @@ mod rate_limit_tests {
         assert_eq!(quota.standard_pct, Some(36.0));
 
         let resets = adapter.quota_resets();
-        assert_eq!(
-            resets.fast_hours.map(|dt| dt.timestamp()),
-            Some(1783893498)
-        );
+        assert_eq!(resets.fast_hours.map(|dt| dt.timestamp()), Some(1783893498));
         assert_eq!(resets.weekly.map(|dt| dt.timestamp()), Some(1784362660));
 
         // Stated by Codex, so the UI must not soften these with a "~"
@@ -913,8 +896,15 @@ mod rate_limit_tests {
         fs::create_dir_all(&day).unwrap();
 
         let line = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"model_context_window":258400},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677},"secondary":{"used_percent":42.5}}}}"#;
-        fs::write(day.join("rollout-test.jsonl"), format!("{}
-", line)).unwrap();
+        fs::write(
+            day.join("rollout-test.jsonl"),
+            format!(
+                "{}
+",
+                line
+            ),
+        )
+        .unwrap();
 
         let config = CodexConfig {
             sessions_dir: dir.path().to_path_buf(),
@@ -954,9 +944,12 @@ mod rate_limit_tests {
         let without = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"premium","primary":null,"secondary":null}}}"#;
         fs::write(
             day.join("rollout-test.jsonl"),
-            format!("{}
+            format!(
+                "{}
 {}
-", with_limits, without),
+",
+                with_limits, without
+            ),
         )
         .unwrap();
 
@@ -984,8 +977,15 @@ mod rate_limit_tests {
         let day = dir.path().join("2026").join("07").join("30");
         fs::create_dir_all(&day).unwrap();
         let line = r#"{"timestamp":"2026-07-30T20:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677}}}}"#;
-        fs::write(day.join("rollout-test.jsonl"), format!("{}
-", line)).unwrap();
+        fs::write(
+            day.join("rollout-test.jsonl"),
+            format!(
+                "{}
+",
+                line
+            ),
+        )
+        .unwrap();
 
         let config = CodexConfig {
             sessions_dir: dir.path().to_path_buf(),

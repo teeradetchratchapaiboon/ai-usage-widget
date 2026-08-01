@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
-use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::freshness::QuotaTiming;
 use crate::provider::ProviderSummary;
+use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::registry::ProviderRegistry;
 use crate::scheduler::CollectionScheduler;
 use crate::storage::StorageLayer;
@@ -113,9 +113,7 @@ pub struct UpdateInfo {
 
 /// Query the storage layer for today's/this week's usage summary.
 #[tauri::command]
-pub async fn get_current_usage(
-    state: tauri::State<'_, AppState>,
-) -> Result<UsageSummary, String> {
+pub async fn get_current_usage(state: tauri::State<'_, AppState>) -> Result<UsageSummary, String> {
     state
         .storage
         .get_current_summary()
@@ -146,10 +144,12 @@ pub async fn get_usage_history(
         "daily" => Granularity::Daily,
         "weekly" => Granularity::Weekly,
         "monthly" => Granularity::Monthly,
-        other => return Err(format!(
-            "Invalid granularity '{}': must be one of hourly, daily, weekly, monthly",
-            other
-        )),
+        other => {
+            return Err(format!(
+                "Invalid granularity '{}': must be one of hourly, daily, weekly, monthly",
+                other
+            ))
+        }
     };
 
     // Construct and validate time range
@@ -158,8 +158,7 @@ pub async fn get_usage_history(
         end: end_dt,
     };
 
-    validate_time_range(&range)
-        .map_err(|e| format!("Time range validation failed: {}", e))?;
+    validate_time_range(&range).map_err(|e| format!("Time range validation failed: {}", e))?;
 
     // Query storage
     state
@@ -330,7 +329,9 @@ pub async fn set_widget_collapsed(
         .to_logical::<f64>(scale);
 
     let (min_height, height) = if collapsed {
-        state.window_manager.remember_expanded_height(current.height);
+        state
+            .window_manager
+            .remember_expanded_height(current.height);
         (
             WindowManager::COLLAPSED_HEIGHT as f64,
             WindowManager::COLLAPSED_HEIGHT as f64,
@@ -375,7 +376,10 @@ pub async fn trigger_collection(
 
     for outcome in outcomes {
         match outcome {
-            crate::registry::ProviderCollectionOutcome::Success { provider_id, result } => {
+            crate::registry::ProviderCollectionOutcome::Success {
+                provider_id,
+                result,
+            } => {
                 providers_collected += 1;
                 log::info!(
                     "Trigger collection: provider '{}' returned {} events",
@@ -431,9 +435,7 @@ pub async fn trigger_collection(
 
 /// Read current application settings.
 #[tauri::command]
-pub async fn get_settings(
-    state: tauri::State<'_, AppState>,
-) -> Result<AppSettings, String> {
+pub async fn get_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings, String> {
     let config = state.config.lock().await;
 
     Ok(AppSettings {
@@ -460,8 +462,7 @@ pub async fn update_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // Validate inputs before applying
-    validate_settings(&settings)
-        .map_err(|e| format!("Settings validation failed: {}", e))?;
+    validate_settings(&settings).map_err(|e| format!("Settings validation failed: {}", e))?;
 
     let mut config = state.config.lock().await;
 
@@ -524,9 +525,7 @@ pub async fn update_settings(
         let result = if enabled {
             std::env::current_exe()
                 .map_err(|e| format!("Cannot resolve executable path: {}", e))
-                .and_then(|exe| {
-                    crate::tray::register_autostart(&exe).map_err(|e| e.to_string())
-                })
+                .and_then(|exe| crate::tray::register_autostart(&exe).map_err(|e| e.to_string()))
         } else {
             crate::tray::unregister_autostart().map_err(|e| e.to_string())
         };
@@ -543,10 +542,7 @@ pub async fn update_settings(
 
 /// Trigger backup to specified path.
 #[tauri::command]
-pub async fn backup_data(
-    path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn backup_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     if path.is_empty() {
         return Err("Backup path must not be empty".to_string());
     }
@@ -562,10 +558,7 @@ pub async fn backup_data(
 
 /// Restore from backup file.
 #[tauri::command]
-pub async fn restore_data(
-    path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn restore_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     if path.is_empty() {
         return Err("Restore path must not be empty".to_string());
     }
@@ -589,8 +582,12 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let current_version = env!("CARGO_PKG_VERSION");
 
     // Fail fast if our own version is not valid semver
-    semver::Version::parse(current_version)
-        .map_err(|e| format!("Failed to parse current version '{}': {}", current_version, e))?;
+    semver::Version::parse(current_version).map_err(|e| {
+        format!(
+            "Failed to parse current version '{}': {}",
+            current_version, e
+        )
+    })?;
 
     // Every outbound request goes through the network guard: only
     // api.github.com is reachable, provider APIs are blocked outright.
@@ -649,7 +646,6 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     }
 }
 
-
 // ─── Testable Helper Functions ──────────────────────────────────────────────────
 
 /// Compare two version strings and report the newer one.
@@ -681,7 +677,11 @@ mod prop_tests_version_comparison {
 
     /// Strategy to generate a valid semver version string "major.minor.patch"
     fn semver_version() -> impl Strategy<Value = String> {
-        (version_component(), version_component(), version_component())
+        (
+            version_component(),
+            version_component(),
+            version_component(),
+        )
             .prop_map(|(major, minor, patch)| format!("{}.{}.{}", major, minor, patch))
     }
 

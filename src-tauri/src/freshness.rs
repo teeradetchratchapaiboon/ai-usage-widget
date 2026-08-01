@@ -243,7 +243,10 @@ mod tests {
             (Freshness::Unknown, "unknown"),
         ] {
             assert_eq!(value.as_str(), expected);
-            assert_eq!(serde_json::to_string(&value).unwrap(), format!("\"{expected}\""));
+            assert_eq!(
+                serde_json::to_string(&value).unwrap(),
+                format!("\"{expected}\"")
+            );
         }
     }
 }

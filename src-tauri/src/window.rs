@@ -238,9 +238,13 @@ impl WindowManager {
 pub mod tauri_ops {
     use super::WindowManager;
     use std::sync::Arc;
-    use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{
+        AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder,
+    };
     use windows::Win32::Foundation::{HWND, RECT};
-    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed,
         SetWindowLongW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
@@ -291,7 +295,11 @@ pub mod tauri_ops {
     // is served from index.html rather than a `/dashboard` route.
 
     /// Set always-on-top state on the compact widget window via Tauri API.
-    pub fn set_always_on_top(app: &AppHandle, wm: &WindowManager, enabled: bool) -> Result<(), String> {
+    pub fn set_always_on_top(
+        app: &AppHandle,
+        wm: &WindowManager,
+        enabled: bool,
+    ) -> Result<(), String> {
         wm.set_always_on_top_config(enabled);
 
         if let Some(window) = app.get_webview_window(wm.compact_label()) {
@@ -325,7 +333,11 @@ pub mod tauri_ops {
     ///
     /// Uses Win32 `WS_EX_TRANSPARENT | WS_EX_LAYERED` extended window styles
     /// to make mouse events pass through to windows below.
-    pub fn set_click_through(app: &AppHandle, wm: &WindowManager, enabled: bool) -> Result<(), String> {
+    pub fn set_click_through(
+        app: &AppHandle,
+        wm: &WindowManager,
+        enabled: bool,
+    ) -> Result<(), String> {
         let window = app
             .get_webview_window(wm.compact_label())
             .ok_or_else(|| "Compact widget window not found".to_string())?;
@@ -353,8 +365,12 @@ pub mod tauri_ops {
 
     /// Window classes that cover the monitor but are not fullscreen apps
     /// (desktop shell, taskbar, Start menu / notification host).
-    const SHELL_WINDOW_CLASSES: [&str; 4] =
-        ["Progman", "WorkerW", "Shell_TrayWnd", "Windows.UI.Core.CoreWindow"];
+    const SHELL_WINDOW_CLASSES: [&str; 4] = [
+        "Progman",
+        "WorkerW",
+        "Shell_TrayWnd",
+        "Windows.UI.Core.CoreWindow",
+    ];
 
     /// Read the Win32 class name of a window.
     fn window_class_name(hwnd: HWND) -> String {
@@ -448,29 +464,31 @@ pub mod tauri_ops {
     /// Register `Win+Shift+U` global shortcut to disable click-through and focus the widget.
     ///
     /// Uses Tauri's global-shortcut plugin.
-    pub fn register_click_through_shortcut(app: &AppHandle, wm: Arc<WindowManager>) -> Result<(), String> {
-        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, Modifiers};
+    pub fn register_click_through_shortcut(
+        app: &AppHandle,
+        wm: Arc<WindowManager>,
+    ) -> Result<(), String> {
+        use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
-        let shortcut = Shortcut::new(
-            Some(Modifiers::SUPER | Modifiers::SHIFT),
-            Code::KeyU,
-        );
+        let shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyU);
 
         let app_handle = app.clone();
         let wm_clone = wm.clone();
 
-        app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, _event| {
-            // Disable click-through mode
-            if wm_clone.is_click_through() {
-                let _ = set_click_through(&app_handle, &wm_clone, false);
-            }
+        app.global_shortcut()
+            .on_shortcut(shortcut, move |_app, _shortcut, _event| {
+                // Disable click-through mode
+                if wm_clone.is_click_through() {
+                    let _ = set_click_through(&app_handle, &wm_clone, false);
+                }
 
-            // Bring the widget to focus
-            if let Some(window) = app_handle.get_webview_window(wm_clone.compact_label()) {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }).map_err(|e| e.to_string())?;
+                // Bring the widget to focus
+                if let Some(window) = app_handle.get_webview_window(wm_clone.compact_label()) {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            })
+            .map_err(|e| e.to_string())?;
 
         Ok(())
     }

@@ -147,23 +147,20 @@ impl ClaudeAdapter {
     const RESET_DROP_THRESHOLD: f64 = 10.0;
 
     /// Find the most recent rollover of one counter and project it forward.
-    fn infer_reset<F>(
-        samples: &[UsageSample],
-        value: F,
-        window: Duration,
-    ) -> Option<DateTime<Utc>>
+    fn infer_reset<F>(samples: &[UsageSample], value: F, window: Duration) -> Option<DateTime<Utc>>
     where
         F: Fn(&UsageSample) -> Option<f64>,
     {
-        let started_at = samples
-            .windows(2)
-            .rev()
-            .find_map(|pair| match (value(&pair[0]), value(&pair[1])) {
-                (Some(before), Some(after)) if before - after >= Self::RESET_DROP_THRESHOLD => {
-                    Some(pair[1].t)
-                }
-                _ => None,
-            })?;
+        let started_at =
+            samples
+                .windows(2)
+                .rev()
+                .find_map(|pair| match (value(&pair[0]), value(&pair[1])) {
+                    (Some(before), Some(after)) if before - after >= Self::RESET_DROP_THRESHOLD => {
+                        Some(pair[1].t)
+                    }
+                    _ => None,
+                })?;
 
         let resets_at = Self::ms_to_datetime(started_at)? + window;
         (resets_at > Utc::now()).then_some(resets_at)
@@ -313,10 +310,7 @@ impl ProviderAdapter for ClaudeAdapter {
             );
             return Err(CollectionError::DataSourceUnavailable(
                 "claude".to_string(),
-                format!(
-                    "data directory not accessible: {}",
-                    self.data_dir.display()
-                ),
+                format!("data directory not accessible: {}", self.data_dir.display()),
             ));
         }
 
@@ -716,7 +710,8 @@ mod tests {
         // Real plan-usage-history.json samples carry only fh/sd; requiring xu
         // made serde reject the file and silently dropped all quota data.
         let dir = tempfile::tempdir().unwrap();
-        let json = r#"{"version":2,"samples":[{"t":1785515157692,"org":"abc","u":{"fh":60,"sd":82}}]}"#;
+        let json =
+            r#"{"version":2,"samples":[{"t":1785515157692,"org":"abc","u":{"fh":60,"sd":82}}]}"#;
         fs::write(dir.path().join("plan-usage-history.json"), json).unwrap();
 
         let adapter = ClaudeAdapter::new(dir.path().to_path_buf());
@@ -732,7 +727,7 @@ mod tests {
     fn test_hash_org_id() {
         let hash = ClaudeAdapter::hash_org_id("test-org-uuid");
         assert_eq!(hash.len(), 64); // SHA-256 produces 64 hex chars
-        // Same input should produce same hash
+                                    // Same input should produce same hash
         assert_eq!(hash, ClaudeAdapter::hash_org_id("test-org-uuid"));
         // Different input should produce different hash
         assert_ne!(hash, ClaudeAdapter::hash_org_id("other-org-uuid"));

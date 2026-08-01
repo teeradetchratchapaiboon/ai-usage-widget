@@ -21,7 +21,10 @@ fn ms(rfc3339: &str) -> i64 {
 }
 
 /// Write a v2 history holding the given `(t_ms, fh, sd)` samples.
-fn adapter_with(dir: &std::path::Path, samples: &[(i64, Option<f64>, Option<f64>)]) -> ClaudeAdapter {
+fn adapter_with(
+    dir: &std::path::Path,
+    samples: &[(i64, Option<f64>, Option<f64>)],
+) -> ClaudeAdapter {
     let entries: Vec<String> = samples
         .iter()
         .map(|(t, fh, sd)| {

@@ -310,7 +310,12 @@ impl NotificationEngine {
     }
 
     /// Record that a notification was just sent.
-    fn record_cooldown(&mut self, provider_id: &str, window: QuotaWindow, level: NotificationLevel) {
+    fn record_cooldown(
+        &mut self,
+        provider_id: &str,
+        window: QuotaWindow,
+        level: NotificationLevel,
+    ) {
         self.cooldowns
             .insert((provider_id.to_string(), window, level), Instant::now());
     }
@@ -544,7 +549,6 @@ mod tests {
         assert_eq!(result[0].level, NotificationLevel::Critical);
     }
 
-
     #[test]
     fn test_wait_rounds_the_smaller_unit_like_the_widget_does() {
         // Truncating turned a full week into "6 days 23 hrs" in the toast
@@ -623,7 +627,11 @@ mod tests {
             )
             .remove(0);
 
-        assert!(entry.message.contains("Resets in 2 days 2 hrs"), "{}", entry.message);
+        assert!(
+            entry.message.contains("Resets in 2 days 2 hrs"),
+            "{}",
+            entry.message
+        );
         // Published, so it must not be hedged
         assert!(!entry.message.contains("about"), "{}", entry.message);
     }
@@ -646,7 +654,11 @@ mod tests {
             )
             .remove(0);
 
-        assert!(entry.message.contains("Resets in about"), "{}", entry.message);
+        assert!(
+            entry.message.contains("Resets in about"),
+            "{}",
+            entry.message
+        );
     }
 
     #[test]
@@ -707,25 +719,40 @@ mod tests {
     #[test]
     fn test_reset_provider_clears_every_window() {
         let mut engine = NotificationEngine::new();
-        engine.check_threshold("codex", "Codex", QuotaReading::new(QuotaWindow::FastHours, 92.0));
-        engine.check_threshold("codex", "Codex", QuotaReading::new(QuotaWindow::Weekly, 92.0));
+        engine.check_threshold(
+            "codex",
+            "Codex",
+            QuotaReading::new(QuotaWindow::FastHours, 92.0),
+        );
+        engine.check_threshold(
+            "codex",
+            "Codex",
+            QuotaReading::new(QuotaWindow::Weekly, 92.0),
+        );
 
         engine.reset_provider("codex");
 
         assert_eq!(
             engine
-                .check_threshold("codex", "Codex", QuotaReading::new(QuotaWindow::FastHours, 92.0))
+                .check_threshold(
+                    "codex",
+                    "Codex",
+                    QuotaReading::new(QuotaWindow::FastHours, 92.0)
+                )
                 .len(),
             1
         );
         assert_eq!(
             engine
-                .check_threshold("codex", "Codex", QuotaReading::new(QuotaWindow::Weekly, 92.0))
+                .check_threshold(
+                    "codex",
+                    "Codex",
+                    QuotaReading::new(QuotaWindow::Weekly, 92.0)
+                )
                 .len(),
             1
         );
     }
-
 }
 
 /// Property-based tests for notification threshold accuracy.
@@ -745,8 +772,7 @@ mod prop_tests_notification {
     /// Strategy for generating valid percentage values (0.0..=100.0)
     /// Strategy for generating provider IDs
     fn provider_id_strategy() -> impl Strategy<Value = String> {
-        prop::string::string_regex("[a-z][a-z0-9_]{1,10}")
-            .unwrap()
+        prop::string::string_regex("[a-z][a-z0-9_]{1,10}").unwrap()
     }
 
     proptest! {

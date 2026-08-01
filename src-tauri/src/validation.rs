@@ -235,7 +235,10 @@ mod tests {
             end: now,
         };
         let result = validate_time_range(&range);
-        assert!(matches!(result, Err(ValidationError::RangeTooLarge(400, 366))));
+        assert!(matches!(
+            result,
+            Err(ValidationError::RangeTooLarge(400, 366))
+        ));
     }
 
     #[test]
@@ -464,7 +467,6 @@ mod tests {
         assert!(validate_provider_id("provider.name").is_err());
     }
 }
-
 
 #[cfg(test)]
 mod prop_tests_validation {

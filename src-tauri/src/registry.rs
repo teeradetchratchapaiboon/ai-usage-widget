@@ -60,10 +60,7 @@ impl ProviderRegistry {
                         provider_id,
                         result,
                     },
-                    Err(error) => ProviderCollectionOutcome::Failed {
-                        provider_id,
-                        error,
-                    },
+                    Err(error) => ProviderCollectionOutcome::Failed { provider_id, error },
                 }
             })
             .collect()
@@ -72,7 +69,10 @@ impl ProviderRegistry {
     /// Collects data from all registered adapters using a specified checkpoint.
     ///
     /// Same as `collect_all` but uses the provided `since` timestamp for all adapters.
-    pub fn collect_all_since(&self, since: Option<DateTime<Utc>>) -> Vec<ProviderCollectionOutcome> {
+    pub fn collect_all_since(
+        &self,
+        since: Option<DateTime<Utc>>,
+    ) -> Vec<ProviderCollectionOutcome> {
         self.adapters
             .iter()
             .map(|adapter| {
@@ -83,10 +83,7 @@ impl ProviderRegistry {
                         provider_id,
                         result,
                     },
-                    Err(error) => ProviderCollectionOutcome::Failed {
-                        provider_id,
-                        error,
-                    },
+                    Err(error) => ProviderCollectionOutcome::Failed { provider_id, error },
                 }
             })
             .collect()
@@ -100,20 +97,21 @@ impl ProviderRegistry {
         self.adapters
             .iter()
             .map(|adapter| {
-                let mut summary = adapter.get_current_summary().unwrap_or_else(|_| {
-                    ProviderSummary {
-                        provider_id: adapter.provider_id().to_string(),
-                        display_name: adapter.display_name().to_string(),
-                        is_available: false,
-                        current_model: None,
-                        tokens_today: None,
-                        quota: None,
-                        context_window: None,
-                        last_activity: None,
-                        quota_resets: Default::default(),
-                        quota_observed: Default::default(),
-                    }
-                });
+                let mut summary =
+                    adapter
+                        .get_current_summary()
+                        .unwrap_or_else(|_| ProviderSummary {
+                            provider_id: adapter.provider_id().to_string(),
+                            display_name: adapter.display_name().to_string(),
+                            is_available: false,
+                            current_model: None,
+                            tokens_today: None,
+                            quota: None,
+                            context_window: None,
+                            last_activity: None,
+                            quota_resets: Default::default(),
+                            quota_observed: Default::default(),
+                        });
                 if summary.quota_resets.is_empty() {
                     summary.quota_resets = adapter.quota_resets();
                 }
@@ -205,7 +203,10 @@ mod prop_tests_provider_isolation {
         fn is_available(&self) -> bool {
             true
         }
-        fn collect(&self, _since: Option<DateTime<Utc>>) -> Result<CollectionResult, CollectionError> {
+        fn collect(
+            &self,
+            _since: Option<DateTime<Utc>>,
+        ) -> Result<CollectionResult, CollectionError> {
             Ok(CollectionResult {
                 events: self.events.clone(),
                 checkpoint: Utc::now(),
@@ -257,7 +258,10 @@ mod prop_tests_provider_isolation {
         fn is_available(&self) -> bool {
             false
         }
-        fn collect(&self, _since: Option<DateTime<Utc>>) -> Result<CollectionResult, CollectionError> {
+        fn collect(
+            &self,
+            _since: Option<DateTime<Utc>>,
+        ) -> Result<CollectionResult, CollectionError> {
             Err(CollectionError::DataSourceUnavailable(
                 self.id.clone(),
                 self.error_msg.clone(),

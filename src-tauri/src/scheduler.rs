@@ -115,7 +115,10 @@ impl CollectionScheduler {
 
             for outcome in outcomes {
                 match outcome {
-                    ProviderCollectionOutcome::Success { provider_id, result } => {
+                    ProviderCollectionOutcome::Success {
+                        provider_id,
+                        result,
+                    } => {
                         info!(
                             "Provider '{}' collected {} events",
                             provider_id,
@@ -126,17 +129,17 @@ impl CollectionScheduler {
                         all_failed = false;
                     }
                     ProviderCollectionOutcome::Failed { provider_id, error } => {
-                        warn!(
-                            "Provider '{}' collection failed: {}",
-                            provider_id, error
-                        );
+                        warn!("Provider '{}' collection failed: {}", provider_id, error);
                     }
                 }
             }
 
             // 4. Process events if any were collected
             let new_event_count = if !all_events.is_empty() {
-                match self.process_events(all_events, &dedup, &reconciliation, &storage).await {
+                match self
+                    .process_events(all_events, &dedup, &reconciliation, &storage)
+                    .await
+                {
                     Ok(count) => count,
                     Err(e) => {
                         error!("Failed to process collected events: {}", e);
@@ -154,7 +157,10 @@ impl CollectionScheduler {
                     continue;
                 }
                 if let Err(e) = storage.save_provider_state(&provider_id, &state).await {
-                    warn!("Failed to persist state for provider '{}': {}", provider_id, e);
+                    warn!(
+                        "Failed to persist state for provider '{}': {}",
+                        provider_id, e
+                    );
                 }
             }
 
@@ -304,40 +310,40 @@ pub async fn process_events(
     reconciliation: &Arc<ReconciliationEngine>,
     storage: &Arc<StorageLayer>,
 ) -> Result<usize, String> {
-        // Phase 1: Deduplicate
-        let unique_events = {
-            let dedup_guard = dedup.lock().await;
-            dedup_guard
-                .deduplicate(events)
-                .await
-                .map_err(|e| format!("deduplication failed: {}", e))?
-        };
-
-        if unique_events.is_empty() {
-            return Ok(0);
-        }
-
-        let new_count = unique_events.len();
-        let fingerprints: Vec<_> = unique_events.iter().map(|(_, fp)| fp.clone()).collect();
-        let raw_events: Vec<_> = unique_events.into_iter().map(|(ev, _)| ev).collect();
-
-        // Phase 2: Reconcile
-        let reconciled = reconciliation.reconcile(raw_events);
-
-        // Phase 3: Store
-        storage
-            .store_events(&reconciled)
+    // Phase 1: Deduplicate
+    let unique_events = {
+        let dedup_guard = dedup.lock().await;
+        dedup_guard
+            .deduplicate(events)
             .await
-            .map_err(|e| format!("storage failed: {}", e))?;
+            .map_err(|e| format!("deduplication failed: {}", e))?
+    };
 
-        // Phase 4: Mark fingerprints as seen
-        {
-            let mut dedup_guard = dedup.lock().await;
-            dedup_guard
-                .mark_seen(&fingerprints)
-                .await
-                .map_err(|e| format!("mark_seen failed: {}", e))?;
-        }
+    if unique_events.is_empty() {
+        return Ok(0);
+    }
+
+    let new_count = unique_events.len();
+    let fingerprints: Vec<_> = unique_events.iter().map(|(_, fp)| fp.clone()).collect();
+    let raw_events: Vec<_> = unique_events.into_iter().map(|(ev, _)| ev).collect();
+
+    // Phase 2: Reconcile
+    let reconciled = reconciliation.reconcile(raw_events);
+
+    // Phase 3: Store
+    storage
+        .store_events(&reconciled)
+        .await
+        .map_err(|e| format!("storage failed: {}", e))?;
+
+    // Phase 4: Mark fingerprints as seen
+    {
+        let mut dedup_guard = dedup.lock().await;
+        dedup_guard
+            .mark_seen(&fingerprints)
+            .await
+            .map_err(|e| format!("mark_seen failed: {}", e))?;
+    }
 
     info!("Stored {} new events after deduplication", new_count);
     Ok(new_count)

@@ -15,9 +15,9 @@ use tempfile::TempDir;
 
 use crate::config::CodexConfig;
 use crate::dedup::DeduplicationEngine;
+use crate::provider::ProviderAdapter;
 use crate::providers::claude::ClaudeAdapter;
 use crate::providers::codex::CodexAdapter;
-use crate::provider::ProviderAdapter;
 use crate::query_types::{Granularity, TimeRange};
 use crate::reconcile::ReconciliationEngine;
 use crate::storage::StorageLayer;
@@ -41,7 +41,8 @@ const CODEX_FIXTURE_JSONL_2: &str = r#"{"timestamp":"2024-07-01T11:00:00Z","type
 const CLAUDE_PLAN_USAGE_FIXTURE: &str = r#"{"version":2,"samples":[{"t":1719828000000,"org":"org-test-123","u":{"fh":45.5,"sd":30.0,"xu":5.0}},{"t":1719828060000,"org":"org-test-123","u":{"fh":50.0,"sd":32.5,"xu":6.0}},{"t":1719828120000,"org":"org-test-456","u":{"fh":20.0,"sd":15.0,"xu":2.0}}]}"#;
 
 /// Claude Desktop buddy-tokens.json fixture.
-const CLAUDE_BUDDY_TOKENS_FIXTURE: &str = r#"{"tokens-today":{"date":"2024-07-01","tokens":75000}}"#;
+const CLAUDE_BUDDY_TOKENS_FIXTURE: &str =
+    r#"{"tokens-today":{"date":"2024-07-01","tokens":75000}}"#;
 
 // ─── Helper Functions ───────────────────────────────────────────────────────
 
@@ -97,7 +98,11 @@ fn test_full_pipeline_codex_only() {
 
         let result = codex_adapter.collect(None).unwrap();
         // 3 events from session1 + 2 events from session2 = 5 total token_count events
-        assert_eq!(result.events.len(), 5, "Should collect 5 token_count events from Codex JSONL");
+        assert_eq!(
+            result.events.len(),
+            5,
+            "Should collect 5 token_count events from Codex JSONL"
+        );
 
         // 2. Deduplicate events
         let db_path = tmp.path().join("test.db");
@@ -106,7 +111,11 @@ fn test_full_pipeline_codex_only() {
         let mut dedup = DeduplicationEngine::new(pool).await.unwrap();
 
         let deduped = dedup.deduplicate(result.events).await.unwrap();
-        assert_eq!(deduped.len(), 5, "First run should pass all events through dedup");
+        assert_eq!(
+            deduped.len(),
+            5,
+            "First run should pass all events through dedup"
+        );
 
         // 3. Reconcile events
         let reconciliation = ReconciliationEngine::new();
@@ -116,7 +125,11 @@ fn test_full_pipeline_codex_only() {
 
         // Events have different timestamps (>1s apart) and different models,
         // so they should remain as separate reconciled events.
-        assert_eq!(reconciled.len(), 5, "All events should be separate after reconciliation");
+        assert_eq!(
+            reconciled.len(),
+            5,
+            "All events should be separate after reconciliation"
+        );
 
         // 4. Store reconciled events
         let stored_count = storage.store_events(&reconciled).await.unwrap();
@@ -130,21 +143,34 @@ fn test_full_pipeline_codex_only() {
             start: "2024-07-01T00:00:00Z".parse().unwrap(),
             end: "2024-07-02T00:00:00Z".parse().unwrap(),
         };
-        let records = storage.get_history(&range, Granularity::Daily).await.unwrap();
+        let records = storage
+            .get_history(&range, Granularity::Daily)
+            .await
+            .unwrap();
 
         // Should have a single daily bucket for "codex" provider
-        assert!(!records.is_empty(), "Should have at least one aggregated record");
+        assert!(
+            !records.is_empty(),
+            "Should have at least one aggregated record"
+        );
         let codex_record = records.iter().find(|r| r.provider_id == "codex").unwrap();
 
         // Total tokens: 450 + 600 + 1500 + 240 + 370 = 3160
         assert_eq!(codex_record.total_tokens, Some(3160));
         assert_eq!(codex_record.input_tokens, Some(150 + 200 + 500 + 80 + 120));
-        assert_eq!(codex_record.output_tokens, Some(300 + 400 + 1000 + 160 + 250));
+        assert_eq!(
+            codex_record.output_tokens,
+            Some(300 + 400 + 1000 + 160 + 250)
+        );
 
         // 7. Verify dedup rejects same events on second collection
         let result2 = codex_adapter.collect(None).unwrap();
         // CodexAdapter uses incremental reads, so second collect returns 0 new events
-        assert_eq!(result2.events.len(), 0, "Incremental read should return 0 events on re-read");
+        assert_eq!(
+            result2.events.len(),
+            0,
+            "Incremental read should return 0 events on re-read"
+        );
 
         storage.close().await;
     });
@@ -167,13 +193,21 @@ fn test_full_pipeline_claude_only() {
 
         let result = claude_adapter.collect(None).unwrap();
         // 3 quota samples from plan-usage-history + 1 daily aggregate from buddy-tokens = 4
-        assert_eq!(result.events.len(), 4, "Should collect 4 events from Claude fixtures");
+        assert_eq!(
+            result.events.len(),
+            4,
+            "Should collect 4 events from Claude fixtures"
+        );
 
         // Verify event types
-        let quota_events: Vec<_> = result.events.iter()
+        let quota_events: Vec<_> = result
+            .events
+            .iter()
             .filter(|e| e.event_type == crate::types::EventType::QuotaSample)
             .collect();
-        let daily_events: Vec<_> = result.events.iter()
+        let daily_events: Vec<_> = result
+            .events
+            .iter()
             .filter(|e| e.event_type == crate::types::EventType::DailyAggregate)
             .collect();
         assert_eq!(quota_events.len(), 3, "Should have 3 QuotaSample events");
@@ -189,7 +223,11 @@ fn test_full_pipeline_claude_only() {
         let mut dedup = DeduplicationEngine::new(pool).await.unwrap();
 
         let deduped = dedup.deduplicate(result.events).await.unwrap();
-        assert_eq!(deduped.len(), 4, "First dedup pass should keep all Claude events");
+        assert_eq!(
+            deduped.len(),
+            4,
+            "First dedup pass should keep all Claude events"
+        );
 
         // 3. Reconcile
         let reconciliation = ReconciliationEngine::new();
@@ -199,7 +237,11 @@ fn test_full_pipeline_claude_only() {
 
         // Quota samples have different timestamps (60s apart) and the daily aggregate
         // is a different event type, so all should remain separate.
-        assert_eq!(reconciled.len(), 4, "All Claude events remain separate after reconciliation");
+        assert_eq!(
+            reconciled.len(),
+            4,
+            "All Claude events remain separate after reconciliation"
+        );
 
         // 4. Store
         let stored_count = storage.store_events(&reconciled).await.unwrap();
@@ -213,7 +255,10 @@ fn test_full_pipeline_claude_only() {
             start: "2024-06-30T00:00:00Z".parse().unwrap(),
             end: "2024-07-02T00:00:00Z".parse().unwrap(),
         };
-        let records = storage.get_history(&range, Granularity::Daily).await.unwrap();
+        let records = storage
+            .get_history(&range, Granularity::Daily)
+            .await
+            .unwrap();
         let claude_record = records.iter().find(|r| r.provider_id == "claude").unwrap();
 
         // total_tokens comes only from buddy-tokens (75000). QuotaSamples have no tokens.
@@ -253,7 +298,11 @@ fn test_full_pipeline_combined_providers() {
         all_events.extend(claude_result.events);
 
         // Total: 5 codex + 4 claude = 9 events
-        assert_eq!(all_events.len(), 9, "Combined collection should yield 9 events");
+        assert_eq!(
+            all_events.len(),
+            9,
+            "Combined collection should yield 9 events"
+        );
 
         // 2. Deduplicate
         let db_path = tmp.path().join("test_combined.db");
@@ -272,7 +321,11 @@ fn test_full_pipeline_combined_providers() {
 
         // Events from different providers never merge (different provider_id).
         // Within each provider, timestamps are far enough apart (>1s) so no merging.
-        assert_eq!(reconciled.len(), 9, "All events should be separate after reconciliation");
+        assert_eq!(
+            reconciled.len(),
+            9,
+            "All events should be separate after reconciliation"
+        );
 
         // 4. Store
         let stored_count = storage.store_events(&reconciled).await.unwrap();
@@ -286,7 +339,10 @@ fn test_full_pipeline_combined_providers() {
             start: "2024-06-30T00:00:00Z".parse().unwrap(),
             end: "2024-07-02T00:00:00Z".parse().unwrap(),
         };
-        let records = storage.get_history(&range, Granularity::Daily).await.unwrap();
+        let records = storage
+            .get_history(&range, Granularity::Daily)
+            .await
+            .unwrap();
 
         // Find provider records
         let codex_record = records.iter().find(|r| r.provider_id == "codex");
@@ -305,10 +361,11 @@ fn test_full_pipeline_combined_providers() {
         assert_eq!(claude_total, 75000, "Claude total tokens should be 75000");
 
         // Total across all providers = 3160 + 75000 = 78160
-        let overall_total: i64 = records.iter()
-            .filter_map(|r| r.total_tokens)
-            .sum();
-        assert_eq!(overall_total, 78160, "Total tokens across all providers should be 78160");
+        let overall_total: i64 = records.iter().filter_map(|r| r.total_tokens).sum();
+        assert_eq!(
+            overall_total, 78160,
+            "Total tokens across all providers should be 78160"
+        );
 
         // 7. Verify get_current_summary (uses today's date so we test the method works)
         let summary = storage.get_current_summary().await.unwrap();
@@ -360,7 +417,11 @@ fn test_dedup_prevents_duplicates_across_cycles() {
         assert_eq!(events2.len(), 4);
 
         let deduped2 = dedup.deduplicate(events2).await.unwrap();
-        assert_eq!(deduped2.len(), 0, "Second cycle should reject all duplicates");
+        assert_eq!(
+            deduped2.len(),
+            0,
+            "Second cycle should reject all duplicates"
+        );
 
         storage.close().await;
     });
@@ -400,18 +461,31 @@ fn test_hourly_aggregation_granularity() {
             start: "2024-07-01T00:00:00Z".parse().unwrap(),
             end: "2024-07-02T00:00:00Z".parse().unwrap(),
         };
-        let records = storage.get_history(&range, Granularity::Hourly).await.unwrap();
+        let records = storage
+            .get_history(&range, Granularity::Hourly)
+            .await
+            .unwrap();
 
         // Session1 events are at 10:xx, session2 events are at 11:xx
         // So we expect 2 hourly buckets
-        assert_eq!(records.len(), 2, "Should have 2 hourly buckets (10:00 and 11:00)");
+        assert_eq!(
+            records.len(),
+            2,
+            "Should have 2 hourly buckets (10:00 and 11:00)"
+        );
 
         // 10:00 bucket: 450 + 600 + 1500 = 2550
-        let hour_10 = records.iter().find(|r| r.timestamp.contains("10:00")).unwrap();
+        let hour_10 = records
+            .iter()
+            .find(|r| r.timestamp.contains("10:00"))
+            .unwrap();
         assert_eq!(hour_10.total_tokens, Some(2550));
 
         // 11:00 bucket: 240 + 370 = 610
-        let hour_11 = records.iter().find(|r| r.timestamp.contains("11:00")).unwrap();
+        let hour_11 = records
+            .iter()
+            .find(|r| r.timestamp.contains("11:00"))
+            .unwrap();
         assert_eq!(hour_11.total_tokens, Some(610));
 
         storage.close().await;

@@ -29,7 +29,11 @@ fn version_component() -> impl Strategy<Value = u32> {
 
 /// Strategy to generate a valid semver version string "major.minor.patch"
 fn semver_version() -> impl Strategy<Value = String> {
-    (version_component(), version_component(), version_component())
+    (
+        version_component(),
+        version_component(),
+        version_component(),
+    )
         .prop_map(|(major, minor, patch)| format!("{}.{}.{}", major, minor, patch))
 }
 

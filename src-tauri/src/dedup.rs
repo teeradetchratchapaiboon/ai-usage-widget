@@ -66,16 +66,12 @@ impl DeduplicationEngine {
         let mut bloom = bloomfilter::Bloom::new_for_fp_rate(1_000_000, 0.01);
 
         // Preload existing fingerprints from database
-        let rows: Vec<(Vec<u8>,)> =
-            sqlx::query_as("SELECT fingerprint FROM seen_fingerprints")
-                .fetch_all(db.as_ref())
-                .await
-                .map_err(|e| {
-                    StorageError::QueryFailed(format!(
-                        "failed to preload fingerprints: {}",
-                        e
-                    ))
-                })?;
+        let rows: Vec<(Vec<u8>,)> = sqlx::query_as("SELECT fingerprint FROM seen_fingerprints")
+            .fetch_all(db.as_ref())
+            .await
+            .map_err(|e| {
+                StorageError::QueryFailed(format!("failed to preload fingerprints: {}", e))
+            })?;
 
         for (fp_bytes,) in &rows {
             if fp_bytes.len() == 32 {
@@ -116,10 +112,7 @@ impl DeduplicationEngine {
                 .fetch_one(self.db.as_ref())
                 .await
                 .map_err(|e| {
-                    StorageError::QueryFailed(format!(
-                        "failed to verify fingerprint: {}",
-                        e
-                    ))
+                    StorageError::QueryFailed(format!("failed to verify fingerprint: {}", e))
                 })?;
 
                 if !exists {
@@ -146,18 +139,13 @@ impl DeduplicationEngine {
     ) -> Result<(), StorageError> {
         for fp in fingerprints {
             // Insert into SQLite
-            sqlx::query(
-                "INSERT OR IGNORE INTO seen_fingerprints (fingerprint) VALUES (?)",
-            )
-            .bind(fp.0.as_slice())
-            .execute(self.db.as_ref())
-            .await
-            .map_err(|e| {
-                StorageError::QueryFailed(format!(
-                    "failed to insert fingerprint: {}",
-                    e
-                ))
-            })?;
+            sqlx::query("INSERT OR IGNORE INTO seen_fingerprints (fingerprint) VALUES (?)")
+                .bind(fp.0.as_slice())
+                .execute(self.db.as_ref())
+                .await
+                .map_err(|e| {
+                    StorageError::QueryFailed(format!("failed to insert fingerprint: {}", e))
+                })?;
 
             // Update Bloom filter
             self.seen_fingerprints.set(&fp.0);
@@ -170,8 +158,8 @@ impl DeduplicationEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::types::TokenUsage;
+    use chrono::Utc;
 
     fn make_event(provider: &str, model: Option<&str>, total_tokens: Option<u64>) -> RawUsageEvent {
         RawUsageEvent {
@@ -209,7 +197,10 @@ mod tests {
         let event2 = make_event("claude", Some("claude-3"), Some(500));
         let fp1 = compute_fingerprint(&event1);
         let fp2 = compute_fingerprint(&event2);
-        assert_ne!(fp1, fp2, "Different events must produce different fingerprints");
+        assert_ne!(
+            fp1, fp2,
+            "Different events must produce different fingerprints"
+        );
     }
 
     #[test]
@@ -267,21 +258,18 @@ mod prop_tests_dedup_completeness {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     /// Strategy to generate a valid UTC timestamp within a reasonable range.
     fn arb_timestamp() -> impl Strategy<Value = chrono::DateTime<Utc>> {
-        (1577836800i64..1893456000i64)
-            .prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
+        (1577836800i64..1893456000i64).prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
     }
 
     /// Strategy to generate an optional model string.
@@ -545,22 +533,19 @@ mod prop_tests {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     /// Strategy to generate a valid UTC timestamp within a reasonable range.
     fn arb_timestamp() -> impl Strategy<Value = chrono::DateTime<Utc>> {
         // Range: 2020-01-01 to 2030-01-01 in seconds
-        (1577836800i64..1893456000i64)
-            .prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
+        (1577836800i64..1893456000i64).prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
     }
 
     /// Strategy to generate an optional model string.

@@ -53,7 +53,8 @@ fn test_observation_times_reach_the_wire_as_rfc3339() {
         fast_hours: Some(at("2026-08-01T11:55:00Z")),
         weekly: Some(at("2026-07-30T12:00:00Z")),
     };
-    let response = provider_status_response_at(summary_with(observed, future_resets(), None), now());
+    let response =
+        provider_status_response_at(summary_with(observed, future_resets(), None), now());
 
     assert_eq!(
         response.quota_fast_observed_at.as_deref(),
@@ -74,7 +75,8 @@ fn test_each_window_is_classified_on_its_own_reading() {
         fast_hours: Some(at("2026-08-01T11:55:00Z")),
         weekly: Some(at("2026-07-30T12:00:00Z")),
     };
-    let response = provider_status_response_at(summary_with(observed, future_resets(), None), now());
+    let response =
+        provider_status_response_at(summary_with(observed, future_resets(), None), now());
 
     assert_eq!(response.quota_fast_freshness, "fresh");
     assert_eq!(response.quota_weekly_freshness, "stale");
@@ -88,7 +90,8 @@ fn test_aging_sits_between_fresh_and_stale() {
         fast_hours: Some(now() - Duration::hours(2)),
         weekly: Some(now() - Duration::minutes(20)),
     };
-    let response = provider_status_response_at(summary_with(observed, future_resets(), None), now());
+    let response =
+        provider_status_response_at(summary_with(observed, future_resets(), None), now());
 
     assert_eq!(response.quota_fast_freshness, "aging");
     assert_eq!(response.quota_weekly_freshness, "aging");

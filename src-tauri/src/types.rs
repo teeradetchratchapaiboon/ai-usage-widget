@@ -105,10 +105,7 @@ mod prop_tests_data_normalization {
     }
 
     fn arb_optional_non_empty_string() -> impl Strategy<Value = Option<String>> {
-        prop_oneof![
-            Just(None),
-            arb_non_empty_string().prop_map(Some),
-        ]
+        prop_oneof![Just(None), arb_non_empty_string().prop_map(Some),]
     }
 
     fn arb_token_usage() -> impl Strategy<Value = TokenUsage> {
@@ -119,15 +116,13 @@ mod prop_tests_data_normalization {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     fn arb_quota_usage() -> impl Strategy<Value = QuotaUsage> {
@@ -137,14 +132,12 @@ mod prop_tests_data_normalization {
             proptest::option::of(0.0f64..500.0),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(fast, standard, excess, daily)| QuotaUsage {
-                    fast_hours_pct: fast,
-                    standard_pct: standard,
-                    excess_pct: excess,
-                    daily_tokens: daily,
-                },
-            )
+            .prop_map(|(fast, standard, excess, daily)| QuotaUsage {
+                fast_hours_pct: fast,
+                standard_pct: standard,
+                excess_pct: excess,
+                daily_tokens: daily,
+            })
     }
 
     fn arb_timestamp() -> impl Strategy<Value = DateTime<Utc>> {
@@ -157,9 +150,7 @@ mod prop_tests_data_normalization {
             .timestamp();
         let max_ts = Utc::now().timestamp() + 3600; // up to 1 hour in future
 
-        (min_ts..max_ts).prop_map(|ts| {
-            DateTime::from_timestamp(ts, 0).unwrap()
-        })
+        (min_ts..max_ts).prop_map(|ts| DateTime::from_timestamp(ts, 0).unwrap())
     }
 
     fn arb_raw_usage_event() -> impl Strategy<Value = RawUsageEvent> {
@@ -176,7 +167,18 @@ mod prop_tests_data_normalization {
             arb_optional_non_empty_string(),
         )
             .prop_map(
-                |(provider_id, event_type, timestamp, model, tokens, context_window, quota, session_hash, project_hash, source_file)| {
+                |(
+                    provider_id,
+                    event_type,
+                    timestamp,
+                    model,
+                    tokens,
+                    context_window,
+                    quota,
+                    session_hash,
+                    project_hash,
+                    source_file,
+                )| {
                     RawUsageEvent {
                         provider_id,
                         event_type,
