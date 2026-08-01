@@ -23,8 +23,8 @@ import { LoadingSkeleton } from "./LoadingSkeleton";
 interface QuotaWindow {
   /** i18n key for the window's name. */
   labelKey: string;
-  /** Percentage consumed, as the provider reports it. */
-  usedPct: number;
+  /** Percentage consumed, or null while the provider is not reporting it. */
+  usedPct: number | null;
   /** When this window rolls over (RFC 3339), if the provider says. */
   resetsAt: string | null;
 }
@@ -35,6 +35,10 @@ interface QuotaWindow {
  * Both vendors cap a short rolling window and a long one independently, and
  * they run out at different times — a full weekly limit says nothing about
  * whether the next five hours are usable, so they are never merged.
+ *
+ * Both rows are always listed. Codex stops publishing its five-hour window
+ * while the weekly one is the binding limit, and a row that vanishes reads as
+ * "this limit is gone" rather than "nothing to report right now".
  */
 function quotaWindows(provider: {
   quota_fast_pct: number | null;
@@ -43,22 +47,20 @@ function quotaWindows(provider: {
   quota_fast_resets_at: string | null;
   quota_weekly_resets_at: string | null;
 }): QuotaWindow[] {
-  const windows: QuotaWindow[] = [];
-
-  if (typeof provider.quota_fast_pct === "number") {
-    windows.push({
+  const windows: QuotaWindow[] = [
+    {
       labelKey: "quota.fastHours",
       usedPct: provider.quota_fast_pct,
       resetsAt: provider.quota_fast_resets_at,
-    });
-  }
-  if (typeof provider.quota_standard_pct === "number") {
-    windows.push({
+    },
+    {
       labelKey: "quota.standard",
       usedPct: provider.quota_standard_pct,
       resetsAt: provider.quota_weekly_resets_at,
-    });
-  }
+    },
+  ];
+
+  // Excess only exists on plans that allow it, so it stays conditional
   if (typeof provider.quota_excess_pct === "number") {
     windows.push({
       labelKey: "quota.excess",
@@ -72,8 +74,11 @@ function quotaWindows(provider: {
 
 /** Most-consumed window, for the one-line collapsed summary. */
 function highestQuota(provider: Parameters<typeof quotaWindows>[0]): number | null {
-  const windows = quotaWindows(provider);
-  return windows.length > 0 ? Math.max(...windows.map((w) => w.usedPct)) : null;
+  const reported = quotaWindows(provider)
+    .map((w) => w.usedPct)
+    .filter((pct): pct is number => pct !== null);
+
+  return reported.length > 0 ? Math.max(...reported) : null;
 }
 
 /** Quota left, from the consumed percentage the providers report. */
@@ -316,19 +321,19 @@ function ProviderRow({
       {/* One meter per window: they run out independently, and which one is
           binding is the whole question when the widget says 0%. */}
       {windows.map((window) => {
-        const left = remainingPct(window.usedPct);
+        const left = window.usedPct === null ? null : remainingPct(window.usedPct);
         return (
           <div key={window.labelKey} className="flex flex-col">
             <ProviderMeter
               label={t(window.labelKey)}
               percentage={left}
-              valueText={`${left.toFixed(0)}%`}
+              valueText={left === null ? "—" : `${left.toFixed(0)}%`}
               danger="low"
             />
             {window.resetsAt && (
               <span
                 className={`text-[9px] pl-4 truncate ${
-                  left <= 0 ? "text-red-300/80" : "text-white/40"
+                  left !== null && left <= 0 ? "text-red-300/80" : "text-white/40"
                 }`}
               >
                 {t("quota.resetsAt")}: {formatResetTime(window.resetsAt)}

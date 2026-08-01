@@ -88,12 +88,14 @@ const fixtureProviders: ProviderStatus[] = [
     last_collection: new Date().toISOString(),
     events_collected: 42,
     errors: [],
+    // Mirrors a real Codex account whose weekly limit is the binding one: it
+    // stops publishing the five-hour window entirely while that lasts.
     quota_fast_pct: null,
-    quota_standard_pct: null,
+    quota_standard_pct: 100,
     quota_excess_pct: null,
     tokens_today: null,
     quota_fast_resets_at: null,
-    quota_weekly_resets_at: null,
+    quota_weekly_resets_at: new Date(Date.now() + 4 * 86400000).toISOString(),
   },
   {
     provider_id: "claude",
@@ -212,6 +214,54 @@ describe("CompactWidget", () => {
     expect(codexTokens.length).toBeGreaterThanOrEqual(1);
     const claudeTokens = screen.getAllByText("8.0K");
     expect(claudeTokens.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps a row for a window the provider is not reporting", async () => {
+    const { CompactWidget } = await import("../components/CompactWidget");
+
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18n}>
+          <CompactWidget />
+        </I18nextProvider>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Codex Desktop")).toBeTruthy();
+    });
+
+    // Both windows are listed for both providers, reported or not
+    expect(screen.getAllByText(i18n.t("quota.fastHours")).length).toBe(2);
+    expect(screen.getAllByText(i18n.t("quota.standard")).length).toBe(2);
+
+    // Codex publishes no five-hour window right now, so its row holds a dash
+    // rather than disappearing and reading as "this limit is gone"
+    expect(screen.getAllByText("—").length).toBe(1);
+  });
+
+  it("marks an exhausted window red even though its bar has no width", async () => {
+    const { CompactWidget } = await import("../components/CompactWidget");
+
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18n}>
+          <CompactWidget />
+        </I18nextProvider>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Codex Desktop")).toBeTruthy();
+    });
+
+    // Codex's weekly window is fully consumed: 0% left
+    const exhausted = screen.getByText("0%");
+    expect(exhausted.className).toContain("text-red-300");
+
+    // The track carries the colour, since a 0%-wide fill draws nothing
+    const track = exhausted.previousElementSibling;
+    expect(track?.className).toContain("bg-red-500/40");
   });
 });
 

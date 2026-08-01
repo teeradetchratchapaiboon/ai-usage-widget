@@ -19,6 +19,9 @@ interface ProviderMeterProps {
   danger?: "high" | "low";
 }
 
+/** At or below this, a "low is bad" meter counts as critical. */
+const CRITICAL_PCT = 10;
+
 export function ProviderMeter({
   label,
   percentage,
@@ -28,7 +31,7 @@ export function ProviderMeter({
   // Determine bar color based on which end of the scale is the bad one
   const getBarColor = (pct: number): string => {
     if (danger === "low") {
-      if (pct <= 10) return "bg-red-400";
+      if (pct <= CRITICAL_PCT) return "bg-red-400";
       if (pct <= 25) return "bg-yellow-400";
       return "bg-green-400";
     }
@@ -36,6 +39,10 @@ export function ProviderMeter({
     if (pct >= 75) return "bg-yellow-400";
     return "bg-blue-400";
   };
+
+  const isCritical =
+    percentage !== null &&
+    (danger === "low" ? percentage <= CRITICAL_PCT : percentage >= 90);
 
   // Clamp to 100 for visual display (bar width) but show actual value as text
   const clampedPct = percentage !== null ? Math.min(percentage, 100) : 0;
@@ -45,7 +52,13 @@ export function ProviderMeter({
       <span className="text-[10px] text-white/70 w-20 shrink-0 truncate" title={label}>
         {label}
       </span>
-      <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+      {/* A critical meter colours its track too: at 0% the fill has no width,
+          so the empty track is the only thing left to carry the warning. */}
+      <div
+        className={`flex-1 h-1.5 rounded-full overflow-hidden ${
+          isCritical ? "bg-red-500/40" : "bg-white/10"
+        }`}
+      >
         {percentage !== null && (
           <div
             className={`h-full rounded-full transition-all duration-300 ${getBarColor(percentage)}`}
@@ -53,7 +66,13 @@ export function ProviderMeter({
           />
         )}
       </div>
-      <span className="text-[10px] text-white/80 w-10 text-right">{valueText}</span>
+      <span
+        className={`text-[10px] w-10 text-right ${
+          isCritical ? "text-red-300 font-semibold" : "text-white/80"
+        }`}
+      >
+        {valueText}
+      </span>
     </div>
   );
 }
