@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod dedup;
 pub mod error;
+pub mod freshness;
 pub mod network;
 pub mod notify;
 pub mod privacy;

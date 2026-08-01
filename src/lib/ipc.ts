@@ -6,6 +6,9 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { Freshness } from "./freshness";
+
+export type { Freshness };
 
 // ─── TypeScript Types (matching Rust response types) ────────────────────────────
 
@@ -46,8 +49,13 @@ export interface ProviderStatus {
   provider_id: string;
   display_name: string;
   is_available: boolean;
-  last_collection: string | null;
-  events_collected: number;
+  /**
+   * Most recent activity the provider itself reports (RFC 3339).
+   *
+   * Was `last_collection`, which it never was. It says nothing about how old
+   * the quota is — `quota_*_observed_at` answers that.
+   */
+  last_activity: string | null;
   errors: string[];
   /** Quota consumed in percent, for providers that publish quota data */
   quota_fast_pct: number | null;
@@ -59,8 +67,22 @@ export interface ProviderStatus {
   quota_fast_resets_at: string | null;
   /** When the weekly window resets (RFC 3339), if known */
   quota_weekly_resets_at: string | null;
-  /** True when the reset times were derived from history, not published */
+  /**
+   * True when the reset times were derived from history, not published.
+   *
+   * Confidence in the *reset time*. Independent of freshness, which is
+   * confidence in the *percentage*.
+   */
   quota_resets_estimated: boolean;
+  /** When the source record supplying each percentage was written (RFC 3339) */
+  quota_fast_observed_at: string | null;
+  quota_weekly_observed_at: string | null;
+  /** Per-window freshness, classified by the backend against one clock */
+  quota_fast_freshness: Freshness;
+  quota_weekly_freshness: Freshness;
+  /** Age of each reading in whole seconds, when it can be determined */
+  quota_fast_age_secs: number | null;
+  quota_weekly_age_secs: number | null;
 }
 
 /** Result of triggering an immediate collection cycle */

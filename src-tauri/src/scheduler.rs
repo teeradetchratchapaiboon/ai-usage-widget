@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use chrono::Utc;
 use log::{error, info, warn};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -169,21 +170,20 @@ impl CollectionScheduler {
                     // toast could not say whether the wait was hours or days,
                     // and a spent five-hour window masked the weekly one
                     // behind it entirely.
+                    // One clock for the whole provider, so the two windows are
+                    // judged against the same instant.
+                    let now = Utc::now();
+                    let (fast_timing, weekly_timing) = crate::commands::quota_timings(&summary);
+
                     let windows = [
-                        (
-                            QuotaWindow::FastHours,
-                            quota.fast_hours_pct,
-                            summary.quota_resets.fast_hours,
-                        ),
-                        (
-                            QuotaWindow::Weekly,
-                            quota.standard_pct,
-                            summary.quota_resets.weekly,
-                        ),
-                        (QuotaWindow::Excess, quota.excess_pct, None),
+                        (QuotaWindow::FastHours, quota.fast_hours_pct, fast_timing),
+                        (QuotaWindow::Weekly, quota.standard_pct, weekly_timing),
+                        // Excess carries no window of its own; it rides on the
+                        // weekly reading that reported it.
+                        (QuotaWindow::Excess, quota.excess_pct, weekly_timing),
                     ];
 
-                    for (window, used_pct, resets_at) in windows {
+                    for (window, used_pct, timing) in windows {
                         let Some(used_pct) = used_pct else {
                             continue;
                         };
@@ -194,8 +194,10 @@ impl CollectionScheduler {
                             QuotaReading {
                                 window,
                                 used_pct,
-                                resets_at,
+                                resets_at: timing.resets_at,
                                 estimated: summary.quota_resets.estimated,
+                                freshness: timing.freshness(now),
+                                age_secs: timing.age_seconds(now),
                             },
                         );
                         for entry in entries {

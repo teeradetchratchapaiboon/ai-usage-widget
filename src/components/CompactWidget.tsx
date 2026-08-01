@@ -15,88 +15,21 @@ import {
   formatCountdown,
 } from "../lib/format";
 import { openDashboard, setWidgetCollapsed, getWidgetCollapsed } from "../lib/ipc";
+import { bindingWindow, quotaWindows, remainingPct, type QuotaWindow } from "../lib/quota";
+import { presentFreshness, formatAge } from "../lib/freshness";
 import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
 import { LoadingSkeleton } from "./LoadingSkeleton";
 
-/** One metered quota window, ready to render. */
-interface QuotaWindow {
-  /** i18n key for the window's name. */
-  labelKey: string;
-  /** Percentage consumed, or null while the provider is not reporting it. */
-  usedPct: number | null;
-  /** When this window rolls over (RFC 3339), if the provider says. */
-  resetsAt: string | null;
-  /** True when `resetsAt` was derived from history rather than published. */
-  estimated: boolean;
-}
-
-/**
- * The quota windows a provider meters, in the order they matter.
- *
- * Both vendors cap a short rolling window and a long one independently, and
- * they run out at different times — a full weekly limit says nothing about
- * whether the next five hours are usable, so they are never merged.
- *
- * Both rows are always listed. Codex stops publishing its five-hour window
- * while the weekly one is the binding limit, and a row that vanishes reads as
- * "this limit is gone" rather than "nothing to report right now".
- */
-function quotaWindows(provider: {
-  quota_fast_pct: number | null;
-  quota_standard_pct: number | null;
-  quota_excess_pct: number | null;
-  quota_fast_resets_at: string | null;
-  quota_weekly_resets_at: string | null;
-  quota_resets_estimated: boolean;
-}): QuotaWindow[] {
-  const estimated = provider.quota_resets_estimated;
-  const windows: QuotaWindow[] = [
-    {
-      labelKey: "quota.fastHours",
-      usedPct: provider.quota_fast_pct,
-      resetsAt: provider.quota_fast_resets_at,
-      estimated,
-    },
-    {
-      labelKey: "quota.standard",
-      usedPct: provider.quota_standard_pct,
-      resetsAt: provider.quota_weekly_resets_at,
-      estimated,
-    },
-  ];
-
-  // Excess only exists on plans that allow it, so it stays conditional
-  if (typeof provider.quota_excess_pct === "number") {
-    windows.push({
-      labelKey: "quota.excess",
-      usedPct: provider.quota_excess_pct,
-      resetsAt: null,
-      estimated: false,
-    });
-  }
-
-  return windows;
-}
-
-/** Most-consumed window, for the one-line collapsed summary. */
-function highestQuota(provider: Parameters<typeof quotaWindows>[0]): number | null {
-  const reported = quotaWindows(provider)
-    .map((w) => w.usedPct)
-    .filter((pct): pct is number => pct !== null);
-
-  return reported.length > 0 ? Math.max(...reported) : null;
-}
-
-/** Quota left, from the consumed percentage the providers report. */
-function remainingPct(usedPct: number): number {
-  return Math.max(0, Math.min(100, 100 - usedPct));
+/** Two-letter provider code for the collapsed one-line summary. */
+function providerCode(providerId: string): string {
+  return providerId === "codex" ? "CX" : "CL";
 }
 
 export function CompactWidget() {
   const { t } = useTranslation();
-  const { usage, providers, isLoading, fetchUsage, fetchProviderStatus } = useAppStore();
+  const { usage, providers, usageLoading, fetchUsage, fetchProviderStatus } = useAppStore();
   const [collapsed, setCollapsed] = useState(false);
 
   const toggleCollapsed = () => {
@@ -139,7 +72,7 @@ export function CompactWidget() {
     return () => clearInterval(interval);
   }, [fetchUsage, fetchProviderStatus]);
 
-  if (isLoading && !usage) {
+  if (usageLoading && !usage) {
     return (
       <div className="widget-glass w-screen h-screen rounded-lg p-3 flex flex-col">
         <LoadingSkeleton />
@@ -171,19 +104,49 @@ export function CompactWidget() {
           {/* Collapsed, the header is all there is — carry the numbers up here */}
           {collapsed &&
             providers.map((provider) => {
-              const quota = highestQuota(provider);
-              if (quota === null) return null;
-              const left = remainingPct(quota);
+              const binding = bindingWindow(provider);
+              if (binding === null || binding.usedPct === null) return null;
+
+              const left = remainingPct(binding.usedPct);
+              const look = presentFreshness(binding.freshness, binding.ageSecs);
+              const age = formatAge(binding.ageSecs);
+
+              // Which window is binding is half the answer: 0% on the
+              // five-hour limit is a coffee break, 0% on the weekly one is
+              // the rest of the week.
+              const label = `${providerCode(provider.provider_id)} ${t(binding.codeKey)}`;
+              const tooltip = [
+                provider.display_name,
+                t(binding.labelKey),
+                look.caption ?? (age && t("freshness.updatedAgo", { age })),
+              ]
+                .filter(Boolean)
+                .join(" · ");
+
               return (
                 <span
                   key={provider.provider_id}
                   data-tauri-drag-region
-                  title={provider.display_name}
-                  className={`text-[10px] font-mono ${
-                    left <= 10 ? "text-red-300" : left <= 25 ? "text-amber-300" : "text-emerald-300"
+                  title={tooltip}
+                  className={`text-[10px] font-mono ${look.valueClass} ${
+                    look.showsValueAsCurrent
+                      ? left <= 10
+                        ? "text-red-300"
+                        : left <= 25
+                          ? "text-amber-300"
+                          : "text-emerald-300"
+                      : "text-white/60"
                   }`}
                 >
-                  {provider.provider_id === "codex" ? "CX" : "CL"} {left.toFixed(0)}%
+                  {label} {left.toFixed(0)}%
+                  {/* A dot is all the room there is at 40px, but it is enough
+                      to stop a stale number reading as a live one */}
+                  {!look.showsValueAsCurrent && (
+                    <span className="text-amber-300" aria-label={look.badge}>
+                      {" "}
+                      •
+                    </span>
+                  )}
                 </span>
               );
             })}
@@ -272,7 +235,7 @@ export function CompactWidget() {
           );
         })}
 
-        {providers.length === 0 && !isLoading && (
+        {providers.length === 0 && !usageLoading && (
           <div className="flex-1 flex items-center justify-center">
             <span className="text-xs text-white/50">{t("status.notAvailable")}</span>
           </div>
@@ -347,7 +310,13 @@ function ProviderRow({
       {/* One meter per window: they run out independently, and which one is
           binding is the whole question when the widget says 0%. */}
       {windows.map((window) => {
-        const left = window.usedPct === null ? null : remainingPct(window.usedPct);
+        const look = presentFreshness(window.freshness, window.ageSecs);
+        // An expired window's percentage describes a window that has already
+        // rolled over, so the figure is known to be wrong, not merely old.
+        const left =
+          window.usedPct === null || look.suppressesValue
+            ? null
+            : remainingPct(window.usedPct);
         const countdown = formatCountdown(window.resetsAt, {
           approximate: window.estimated,
         });
@@ -358,6 +327,9 @@ function ProviderRow({
               .filter(Boolean)
               .join(" · ")
           : undefined;
+        const observedTooltip = window.observedAt
+          ? `${t("freshness.observedAt")}: ${formatResetTime(window.observedAt)}`
+          : look.badge;
 
         return (
           <div key={window.labelKey} className="flex flex-col">
@@ -366,8 +338,20 @@ function ProviderRow({
               percentage={left}
               valueText={left === null ? "—" : `${left.toFixed(0)}%`}
               danger="low"
+              valueClassName={look.valueClass}
+              muted={!look.showsValueAsCurrent}
             />
-            {countdown && (
+            {/* Age before reset: how much the number can be trusted comes
+                first, since it decides whether the countdown means anything. */}
+            {look.caption && (
+              <span
+                title={observedTooltip}
+                className={`text-[9px] pl-4 truncate ${look.captionClass}`}
+              >
+                {look.caption}
+              </span>
+            )}
+            {countdown && !look.suppressesValue && (
               <span
                 title={detail}
                 className={`text-[9px] pl-4 truncate ${

@@ -17,6 +17,16 @@ interface ProviderMeterProps {
    * "low" means a low number is bad (remaining quota).
    */
   danger?: "high" | "low";
+  /** Extra classes for the value text, e.g. the muted look of a stale reading. */
+  valueClassName?: string;
+  /**
+   * Drain the confident colouring.
+   *
+   * A reading that cannot be shown as current must not carry the same
+   * red/amber/green signal as a live one — that colour is exactly what makes a
+   * glance at the widget feel authoritative.
+   */
+  muted?: boolean;
 }
 
 /** At or below this, a "low is bad" meter counts as critical. */
@@ -27,9 +37,13 @@ export function ProviderMeter({
   percentage,
   valueText,
   danger = "high",
+  valueClassName = "",
+  muted = false,
 }: ProviderMeterProps) {
   // Determine bar color based on which end of the scale is the bad one
   const getBarColor = (pct: number): string => {
+    // Grey: the value is not current, so its severity is not either
+    if (muted) return "bg-white/25";
     if (danger === "low") {
       if (pct <= CRITICAL_PCT) return "bg-red-400";
       if (pct <= 25) return "bg-yellow-400";
@@ -41,6 +55,7 @@ export function ProviderMeter({
   };
 
   const isCritical =
+    !muted &&
     percentage !== null &&
     (danger === "low" ? percentage <= CRITICAL_PCT : percentage >= 90);
 
@@ -69,7 +84,7 @@ export function ProviderMeter({
       <span
         className={`text-[10px] w-10 text-right ${
           isCritical ? "text-red-300 font-semibold" : "text-white/80"
-        }`}
+        } ${valueClassName}`}
       >
         {valueText}
       </span>

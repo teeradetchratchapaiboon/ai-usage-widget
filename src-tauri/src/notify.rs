@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 
+use crate::freshness::Freshness;
+
 /// Notification severity level based on quota threshold.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NotificationLevel {
@@ -45,16 +47,40 @@ pub struct QuotaReading {
     pub resets_at: Option<DateTime<Utc>>,
     /// True when `resets_at` was derived rather than published.
     pub estimated: bool,
+    /// How current the percentage is. A toast asserts something about right
+    /// now, so anything that cannot support that claim stays silent.
+    pub freshness: Freshness,
+    /// Age of the reading in seconds, for the aging disclosure.
+    pub age_secs: Option<i64>,
 }
 
 impl QuotaReading {
     /// A reading with no reset information, for providers that publish none.
+    ///
+    /// Defaults to [`Freshness::Fresh`]: this constructor exists for tests
+    /// about thresholds and cooldowns, where staleness is not the subject.
     pub fn new(window: QuotaWindow, used_pct: f64) -> Self {
         Self {
             window,
             used_pct,
             resets_at: None,
             estimated: false,
+            freshness: Freshness::Fresh,
+            age_secs: None,
+        }
+    }
+
+    /// The "(data is N old)" clause an aging reading must carry.
+    ///
+    /// Warning someone off a quota without saying the number is six hours old
+    /// invites them to act on it as though it were current.
+    fn age_clause(&self) -> String {
+        if !self.freshness.requires_age_disclosure() {
+            return String::new();
+        }
+        match self.age_secs.and_then(format_age) {
+            Some(age) => format!(" Data is {} old.", age),
+            None => String::new(),
         }
     }
 
@@ -72,6 +98,17 @@ impl QuotaReading {
             format!(" Resets in {}.", wait)
         }
     }
+}
+
+/// Render an elapsed span in seconds the same way waits are rendered.
+///
+/// Returns None below a minute: "Data is 12 seconds old" is noise on a
+/// notification that is at most a few minutes from its source.
+fn format_age(seconds: i64) -> Option<String> {
+    if seconds < 60 {
+        return None;
+    }
+    format_wait(Utc::now() + chrono::Duration::seconds(seconds))
 }
 
 /// Render the wait until `until` as at most two units: "4 days 2 hrs".
@@ -196,6 +233,14 @@ impl NotificationEngine {
         provider_name: &str,
         reading: QuotaReading,
     ) -> Vec<NotificationEntry> {
+        // Freshness gate first, before any threshold or cooldown work. A
+        // percentage that cannot be shown as current cannot be warned about
+        // either — and because a snapshot is restored from disk at startup,
+        // without this a two-day-old 100% would toast on every launch.
+        if !reading.freshness.may_notify() {
+            return Vec::new();
+        }
+
         let current_pct = reading.used_pct;
 
         let (level, threshold) = if current_pct >= self.critical_threshold {
@@ -228,7 +273,9 @@ impl NotificationEngine {
                     NotificationLevel::Warning => "warning",
                 },
                 threshold,
-                reading.reset_sentence(),
+                // Age first, then reset: how much the number can be trusted
+                // comes before what it says will happen.
+                reading.age_clause() + &reading.reset_sentence(),
             ),
         };
 
@@ -274,6 +321,10 @@ impl Default for NotificationEngine {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "notify_freshness_tests.rs"]
+mod freshness_gate_tests;
 
 #[cfg(test)]
 mod tests {
@@ -566,6 +617,8 @@ mod tests {
                     used_pct: 100.0,
                     resets_at: Some(Utc::now() + chrono::Duration::hours(50)),
                     estimated: false,
+                    freshness: Freshness::Fresh,
+                    age_secs: None,
                 },
             )
             .remove(0);
@@ -587,6 +640,8 @@ mod tests {
                     used_pct: 95.0,
                     resets_at: Some(Utc::now() + chrono::Duration::hours(3)),
                     estimated: true,
+                    freshness: Freshness::Fresh,
+                    age_secs: None,
                 },
             )
             .remove(0);
@@ -608,6 +663,8 @@ mod tests {
                     used_pct: 100.0,
                     resets_at: Some(Utc::now() - chrono::Duration::hours(6)),
                     estimated: false,
+                    freshness: Freshness::Fresh,
+                    age_secs: None,
                 },
             )
             .remove(0);

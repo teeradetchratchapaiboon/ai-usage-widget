@@ -52,6 +52,27 @@ impl QuotaResets {
     }
 }
 
+/// When each quota window's percentage was actually written by its source.
+///
+/// Kept separate from [`QuotaResets`] because the two answer different
+/// questions: a reset time says when the number will change, this says how much
+/// the number can still be trusted. A percentage is only ever as current as the
+/// record it came from — the collection cycle that noticed it says nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuotaObservations {
+    /// Source timestamp of the short-window percentage.
+    pub fast_hours: Option<DateTime<Utc>>,
+    /// Source timestamp of the long-window percentage.
+    pub weekly: Option<DateTime<Utc>>,
+}
+
+impl QuotaObservations {
+    /// True when neither window carries a usable observation time.
+    pub fn is_empty(&self) -> bool {
+        self.fast_hours.is_none() && self.weekly.is_none()
+    }
+}
+
 /// Summary of a provider's current state for display in the widget.
 #[derive(Debug, Clone)]
 pub struct ProviderSummary {
@@ -73,6 +94,8 @@ pub struct ProviderSummary {
     pub last_activity: Option<DateTime<Utc>>,
     /// When each quota window resets, for providers that publish it.
     pub quota_resets: QuotaResets,
+    /// When each quota window's percentage was written by its source.
+    pub quota_observed: QuotaObservations,
 }
 
 /// Trait defining the interface for data collection adapters.
@@ -105,6 +128,14 @@ pub trait ProviderAdapter: Send + Sync {
     /// When the provider's quota windows reset, if it publishes them.
     fn quota_resets(&self) -> QuotaResets {
         QuotaResets::default()
+    }
+
+    /// When each quota percentage was written by the source that supplied it.
+    ///
+    /// Adapters that cannot tell return the default (unknown), which the UI
+    /// renders as an unknown age — never as a current reading.
+    fn quota_observed(&self) -> QuotaObservations {
+        QuotaObservations::default()
     }
 
     /// Export the adapter's incremental-collection state so it can be persisted.

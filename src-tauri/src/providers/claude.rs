@@ -112,6 +112,36 @@ impl ClaudeAdapter {
         }
     }
 
+    /// When the percentages in `sample` were recorded, per window.
+    ///
+    /// Claude stamps every sample with `t`, so the age of a reading is stated
+    /// by the file rather than inferred — unlike its reset times, which are
+    /// reconstructed. A window the sample does not report gets no timestamp:
+    /// there is no reading to be fresh or stale.
+    fn observed_from(sample: &UsageSample) -> crate::provider::QuotaObservations {
+        let observed_at = Self::ms_to_datetime(sample.t);
+        crate::provider::QuotaObservations {
+            fast_hours: sample.u.fh.and(observed_at),
+            weekly: sample.u.sd.and(observed_at),
+        }
+    }
+
+    /// Observation times taken from the newest sample on disk.
+    fn read_quota_observed(&self) -> crate::provider::QuotaObservations {
+        let plan_path = self.data_dir.join("plan-usage-history.json");
+        let Ok(content) = std::fs::read_to_string(&plan_path) else {
+            return crate::provider::QuotaObservations::default();
+        };
+        match serde_json::from_str::<PlanUsageHistory>(&content) {
+            Ok(history) if history.version == 2 => history
+                .samples
+                .last()
+                .map(Self::observed_from)
+                .unwrap_or_default(),
+            _ => crate::provider::QuotaObservations::default(),
+        }
+    }
+
     /// Percentage-point fall that counts as a window rolling over rather than
     /// as the ordinary jitter of a rounded percentage.
     const RESET_DROP_THRESHOLD: f64 = 10.0;
@@ -365,6 +395,7 @@ impl ProviderAdapter for ClaudeAdapter {
         let mut quota = None;
         let mut tokens_today = None;
         let mut quota_resets = crate::provider::QuotaResets::default();
+        let mut quota_observed = crate::provider::QuotaObservations::default();
 
         // Try to read current quota from plan-usage-history.json
         let plan_path = self.data_dir.join("plan-usage-history.json");
@@ -379,6 +410,7 @@ impl ProviderAdapter for ClaudeAdapter {
                                 excess_pct: latest.u.xu,
                                 daily_tokens: None,
                             });
+                            quota_observed = Self::observed_from(latest);
                         }
                         quota_resets = Self::infer_quota_resets(&history.samples);
                     }
@@ -406,6 +438,7 @@ impl ProviderAdapter for ClaudeAdapter {
             context_window: None,
             last_activity: None,
             quota_resets,
+            quota_observed,
         })
     }
 
@@ -418,6 +451,10 @@ impl ProviderAdapter for ClaudeAdapter {
             Ok(history) if history.version == 2 => Self::infer_quota_resets(&history.samples),
             _ => crate::provider::QuotaResets::default(),
         }
+    }
+
+    fn quota_observed(&self) -> crate::provider::QuotaObservations {
+        self.read_quota_observed()
     }
 
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
@@ -603,6 +640,10 @@ mod prop_tests_claude_checkpoint {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "claude_quota_tests.rs"]
+mod quota_observation_tests;
 
 #[cfg(test)]
 mod tests {
