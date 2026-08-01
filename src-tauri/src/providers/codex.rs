@@ -657,6 +657,8 @@ impl ProviderAdapter for CodexAdapter {
             quota_resets: crate::provider::QuotaResets {
                 fast_hours: snapshot.fast_resets_at,
                 weekly: snapshot.weekly_resets_at,
+                // Codex states these outright in its rate-limit payload
+                estimated: false,
             },
         })
     }
@@ -666,6 +668,7 @@ impl ProviderAdapter for CodexAdapter {
         crate::provider::QuotaResets {
             fast_hours: snapshot.fast_resets_at,
             weekly: snapshot.weekly_resets_at,
+            estimated: false,
         }
     }
 
@@ -817,6 +820,9 @@ mod rate_limit_tests {
             Some(1783893498)
         );
         assert_eq!(resets.weekly.map(|dt| dt.timestamp()), Some(1784362660));
+
+        // Stated by Codex, so the UI must not soften these with a "~"
+        assert!(!resets.estimated);
     }
 
     #[test]

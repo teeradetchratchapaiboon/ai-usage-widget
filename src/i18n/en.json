@@ -50,7 +50,8 @@
     "label": "Quota",
     "used": "Quota used",
     "resetsAt": "Resets",
-    "remaining": "Quota left"
+    "remaining": "Quota left",
+    "estimated": "Estimated from usage history — Claude does not publish reset times"
   },
   "notification": {
     "usageWarning": "Usage warning: {{provider}} at {{pct}}%",
@@ -74,7 +75,14 @@
     "seconds": "seconds",
     "minutes": "minutes",
     "hours": "hours",
-    "days": "days"
+    "days": "days",
+    "in": "in",
+    "dayShort_one": "day",
+    "dayShort_other": "days",
+    "hourShort_one": "hr",
+    "hourShort_other": "hrs",
+    "minuteShort_one": "min",
+    "minuteShort_other": "min"
   },
   "actions": {
     "expand": "Expand",

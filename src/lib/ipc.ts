@@ -59,6 +59,8 @@ export interface ProviderStatus {
   quota_fast_resets_at: string | null;
   /** When the weekly window resets (RFC 3339), if known */
   quota_weekly_resets_at: string | null;
+  /** True when the reset times were derived from history, not published */
+  quota_resets_estimated: boolean;
 }
 
 /** Result of triggering an immediate collection cycle */

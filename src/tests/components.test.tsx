@@ -13,6 +13,7 @@ import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
 import { useAppStore } from "../store";
 import type { UsageSummary, ProviderStatus, UsageRecord } from "../lib/ipc";
+import { formatResetTime } from "../lib/format";
 
 // ─── Mock @tauri-apps/api/core ──────────────────────────────────────────────────
 
@@ -96,6 +97,8 @@ const fixtureProviders: ProviderStatus[] = [
     tokens_today: null,
     quota_fast_resets_at: null,
     quota_weekly_resets_at: new Date(Date.now() + 4 * 86400000).toISOString(),
+    // Codex publishes its reset timestamps outright
+    quota_resets_estimated: false,
   },
   {
     provider_id: "claude",
@@ -110,6 +113,8 @@ const fixtureProviders: ProviderStatus[] = [
     tokens_today: 29036,
     quota_fast_resets_at: new Date(Date.now() + 2 * 3600000).toISOString(),
     quota_weekly_resets_at: new Date(Date.now() + 3 * 86400000).toISOString(),
+    // Claude publishes none, so ours are reconstructed from its history
+    quota_resets_estimated: true,
   },
 ];
 
@@ -263,7 +268,74 @@ describe("CompactWidget", () => {
     const track = exhausted.previousElementSibling;
     expect(track?.className).toContain("bg-red-500/40");
   });
+
+  it("counts down to a reset instead of printing a wall-clock date", async () => {
+    const { CompactWidget } = await import("../components/CompactWidget");
+
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18n}>
+          <CompactWidget />
+        </I18nextProvider>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Codex Desktop")).toBeTruthy();
+    });
+
+    // Codex's only reset is the weekly one, just under four days out
+    const [codexWeekly] = resetLines();
+    const absolute = formatResetTime(fixtureProviders[0].quota_weekly_resets_at);
+
+    expect(codexWeekly.textContent).toContain(i18n.t("time.in"));
+    expect(codexWeekly.textContent).toContain(i18n.t("time.dayShort", { count: 4 }));
+    // The wait is the question; a date the reader has to subtract from is not
+    expect(codexWeekly.textContent).not.toContain(absolute);
+
+    // Still one hover away, though — the precise time is not thrown out
+    expect(codexWeekly.getAttribute("title")).toContain(absolute);
+  });
+
+  it("flags Claude's reconstructed resets as estimates but not Codex's", async () => {
+    const { CompactWidget } = await import("../components/CompactWidget");
+
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18n}>
+          <CompactWidget />
+        </I18nextProvider>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Claude Desktop")).toBeTruthy();
+    });
+
+    // Codex weekly, then Claude's five-hour and weekly
+    const lines = resetLines();
+    expect(lines).toHaveLength(3);
+
+    const [codex, ...claude] = lines;
+    expect(codex.textContent).not.toContain("~");
+    expect(codex.getAttribute("title")).not.toContain(i18n.t("quota.estimated"));
+
+    // Claude publishes no reset times; ours are projected off its history, and
+    // presenting that with Codex's confidence would be a lie about the source.
+    for (const line of claude) {
+      expect(line.textContent).toContain("~");
+      expect(line.getAttribute("title")).toContain(i18n.t("quota.estimated"));
+    }
+  });
 });
+
+/** The rendered "resets" lines, in document order. */
+function resetLines(): HTMLElement[] {
+  const prefix = `${i18n.t("quota.resetsAt")}:`;
+  return Array.from(document.querySelectorAll("span")).filter((span) =>
+    span.textContent?.startsWith(prefix),
+  );
+}
 
 describe("Dashboard", () => {
   beforeEach(() => {

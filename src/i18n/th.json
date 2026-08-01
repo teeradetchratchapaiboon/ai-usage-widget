@@ -50,7 +50,8 @@
     "label": "โควตา",
     "used": "โควตาที่ใช้",
     "resetsAt": "รีเซ็ต",
-    "remaining": "คงเหลือ"
+    "remaining": "คงเหลือ",
+    "estimated": "ประมาณจากประวัติการใช้ — Claude ไม่ได้บอกเวลารีเซ็ตมา"
   },
   "notification": {
     "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",
@@ -74,7 +75,11 @@
     "seconds": "วินาที",
     "minutes": "นาที",
     "hours": "ชั่วโมง",
-    "days": "วัน"
+    "days": "วัน",
+    "in": "อีก",
+    "dayShort_other": "วัน",
+    "hourShort_other": "ชม.",
+    "minuteShort_other": "น."
   },
   "actions": {
     "expand": "กางออก",

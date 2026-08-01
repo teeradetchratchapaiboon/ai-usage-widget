@@ -36,6 +36,13 @@ pub struct QuotaResets {
     pub fast_hours: Option<DateTime<Utc>>,
     /// Long window: Codex's 10080-minute limit, Claude's `sd`.
     pub weekly: Option<DateTime<Utc>>,
+    /// True when these times were derived rather than published.
+    ///
+    /// Codex states its reset timestamps outright; Claude states nothing and
+    /// ours are reconstructed from where its usage history dropped. Both end
+    /// up in the same field, so without this flag the UI would present a
+    /// reconstruction with the same confidence as a fact.
+    pub estimated: bool,
 }
 
 impl QuotaResets {

@@ -125,8 +125,19 @@ impl WindowManager {
         }
     }
 
+    /// Smallest height that can be a deliberate window size rather than the
+    /// widget sitting collapsed to its header strip.
+    pub const MIN_PERSISTABLE_HEIGHT: u32 = 150;
+
     /// Persist the window size to config.
+    ///
+    /// Collapsing fires a resize like any other, so without this floor the
+    /// header-strip height becomes the widget's remembered size and the next
+    /// launch is a 40-pixel sliver with no visible way out.
     pub fn persist_size(&self, width: u32, height: u32) {
+        if height < Self::MIN_PERSISTABLE_HEIGHT {
+            return;
+        }
         let mut cfg = self.config.lock().unwrap();
         cfg.width = width;
         cfg.height = height;
@@ -590,5 +601,57 @@ mod tests {
 
         wm.set_hidden_for_fullscreen(false);
         assert!(!wm.is_hidden_for_fullscreen());
+    }
+}
+
+#[cfg(test)]
+mod collapse_persistence_tests {
+    use super::*;
+
+    fn manager() -> WindowManager {
+        WindowManager::new(
+            WindowConfig::default(),
+            &std::env::temp_dir().join("ai_usage_widget_test_collapse"),
+        )
+    }
+
+    #[test]
+    fn test_collapsing_does_not_become_the_remembered_window_size() {
+        // Collapsing resizes the window, which fires the same Resized event as
+        // a user drag. Storing that height would reopen the widget as a strip
+        // too short to show the control that expands it again.
+        let wm = manager();
+        let (_, before) = wm.compact_widget_size();
+
+        wm.persist_size(340, 40);
+
+        assert_eq!(wm.compact_widget_size(), (340, before));
+    }
+
+    #[test]
+    fn test_a_deliberate_resize_is_still_remembered() {
+        let wm = manager();
+
+        wm.persist_size(400, WindowManager::MIN_PERSISTABLE_HEIGHT);
+        assert_eq!(
+            wm.compact_widget_size(),
+            (400, WindowManager::MIN_PERSISTABLE_HEIGHT)
+        );
+
+        wm.persist_size(420, 520);
+        assert_eq!(wm.compact_widget_size(), (420, 520));
+    }
+
+    #[test]
+    fn test_expanding_falls_back_to_the_configured_height() {
+        // Nothing was remembered, so expanding must not read the collapsed
+        // strip back out of the config.
+        let wm = manager();
+        wm.persist_size(340, 40);
+
+        assert_eq!(
+            wm.take_expanded_height(),
+            crate::config::DEFAULT_WIDGET_HEIGHT as f64
+        );
     }
 }

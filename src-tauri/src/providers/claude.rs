@@ -107,6 +107,8 @@ impl ClaudeAdapter {
         crate::provider::QuotaResets {
             fast_hours: Self::infer_reset(samples, |s| s.u.fh, Duration::hours(5)),
             weekly: Self::infer_reset(samples, |s| s.u.sd, Duration::days(7)),
+            // Every time here is projected off a drop, never a stated value
+            estimated: true,
         }
     }
 
@@ -647,6 +649,9 @@ mod tests {
         );
         // `sd` only ever climbed here, so no weekly rollover can be placed
         assert_eq!(resets.weekly, None);
+
+        // Reconstructed, not published — the UI has to be able to say so
+        assert!(resets.estimated);
     }
 
     #[test]

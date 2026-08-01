@@ -12,6 +12,7 @@ import {
   formatTokenCountCompact,
   formatRelative,
   formatResetTime,
+  formatCountdown,
 } from "../lib/format";
 import { openDashboard, setWidgetCollapsed } from "../lib/ipc";
 import { toggleMaximizeWindow } from "../lib/tauri";
@@ -27,6 +28,8 @@ interface QuotaWindow {
   usedPct: number | null;
   /** When this window rolls over (RFC 3339), if the provider says. */
   resetsAt: string | null;
+  /** True when `resetsAt` was derived from history rather than published. */
+  estimated: boolean;
 }
 
 /**
@@ -46,17 +49,21 @@ function quotaWindows(provider: {
   quota_excess_pct: number | null;
   quota_fast_resets_at: string | null;
   quota_weekly_resets_at: string | null;
+  quota_resets_estimated: boolean;
 }): QuotaWindow[] {
+  const estimated = provider.quota_resets_estimated;
   const windows: QuotaWindow[] = [
     {
       labelKey: "quota.fastHours",
       usedPct: provider.quota_fast_pct,
       resetsAt: provider.quota_fast_resets_at,
+      estimated,
     },
     {
       labelKey: "quota.standard",
       usedPct: provider.quota_standard_pct,
       resetsAt: provider.quota_weekly_resets_at,
+      estimated,
     },
   ];
 
@@ -66,6 +73,7 @@ function quotaWindows(provider: {
       labelKey: "quota.excess",
       usedPct: provider.quota_excess_pct,
       resetsAt: null,
+      estimated: false,
     });
   }
 
@@ -99,6 +107,16 @@ export function CompactWidget() {
       setCollapsed(!next);
     });
   };
+
+  // The collapsed flag lives in React but the height lives in the window, and
+  // a webview reload resets one without the other — leaving an expanded UI
+  // inside a 40px strip, where the only control that could fix it is scrolled
+  // out of sight. Mounting expanded means the window must be expanded too.
+  useEffect(() => {
+    void setWidgetCollapsed(false).catch((err) => {
+      console.warn("Could not restore the widget height:", err);
+    });
+  }, []);
 
   // Fetch on mount and every 10 seconds
   useEffect(() => {
@@ -322,6 +340,17 @@ function ProviderRow({
           binding is the whole question when the widget says 0%. */}
       {windows.map((window) => {
         const left = window.usedPct === null ? null : remainingPct(window.usedPct);
+        const countdown = formatCountdown(window.resetsAt, {
+          approximate: window.estimated,
+        });
+        // The wall-clock time stays reachable on hover, alongside the reason
+        // the number is soft when it was reconstructed rather than published.
+        const detail = window.resetsAt
+          ? [formatResetTime(window.resetsAt), window.estimated ? t("quota.estimated") : null]
+              .filter(Boolean)
+              .join(" · ")
+          : undefined;
+
         return (
           <div key={window.labelKey} className="flex flex-col">
             <ProviderMeter
@@ -330,13 +359,14 @@ function ProviderRow({
               valueText={left === null ? "—" : `${left.toFixed(0)}%`}
               danger="low"
             />
-            {window.resetsAt && (
+            {countdown && (
               <span
+                title={detail}
                 className={`text-[9px] pl-4 truncate ${
                   left !== null && left <= 0 ? "text-red-300/80" : "text-white/40"
                 }`}
               >
-                {t("quota.resetsAt")}: {formatResetTime(window.resetsAt)}
+                {t("quota.resetsAt")}: {countdown}
               </span>
             )}
           </div>

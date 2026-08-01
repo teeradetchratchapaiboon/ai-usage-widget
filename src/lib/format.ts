@@ -146,3 +146,77 @@ export function formatResetTime(iso: string | null): string {
     minute: "2-digit",
   });
 }
+
+/**
+ * How long until a quota window rolls over — "in 4 days 2 hrs" / "อีก 4 วัน 2 ชม.".
+ *
+ * A wall-clock reset time makes the reader subtract dates in their head to
+ * answer the only question they actually have: how long is the wait. Two
+ * units is all the precision that question needs.
+ *
+ * Set `approximate` for a time that was reconstructed rather than published;
+ * it marks the number itself ("in ~4 days"), since that is what is uncertain.
+ *
+ * Returns null when the timestamp is missing, unparseable, or already past,
+ * so callers drop the line rather than state something untrue. A reset in the
+ * past is not "about to happen" — it is a reading too old to say anything
+ * about, and Codex hands one over whenever the app has been idle past its
+ * five-hour window.
+ */
+export function formatCountdown(
+  iso: string | null,
+  options: { approximate?: boolean } = {},
+): string | null {
+  if (!iso) {
+    return null;
+  }
+
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) {
+    return null;
+  }
+
+  const diffSec = Math.floor((target - Date.now()) / 1000);
+  if (diffSec <= 0) {
+    return null;
+  }
+
+  // Round the smaller unit rather than truncate: a freshly issued seven-day
+  // window floors to "6 days 23 hrs", which reads as a bug rather than as a
+  // full week. Rounding can spill into the larger unit, so carry it.
+  let days = Math.floor(diffSec / 86400);
+  let hours: number;
+  let minutes = 0;
+
+  if (days > 0) {
+    hours = Math.round((diffSec % 86400) / 3600);
+    if (hours === 24) {
+      days += 1;
+      hours = 0;
+    }
+  } else {
+    hours = Math.floor(diffSec / 3600);
+    minutes = Math.round((diffSec % 3600) / 60);
+    if (minutes === 60) {
+      hours += 1;
+      minutes = 0;
+    }
+  }
+
+  const unit = (key: string, count: number) => `${count} ${i18n.t(key, { count })}`;
+
+  const parts: string[] = [];
+  if (days > 0) {
+    parts.push(unit("time.dayShort", days));
+    if (hours > 0) parts.push(unit("time.hourShort", hours));
+  } else if (hours > 0) {
+    parts.push(unit("time.hourShort", hours));
+    if (minutes > 0) parts.push(unit("time.minuteShort", minutes));
+  } else {
+    // Under a minute still reads as "1 min" — "0 min" looks like a stuck clock
+    parts.push(unit("time.minuteShort", Math.max(1, minutes)));
+  }
+
+  const marker = options.approximate ? "~" : "";
+  return `${i18n.t("time.in")} ${marker}${parts.join(" ")}`;
+}

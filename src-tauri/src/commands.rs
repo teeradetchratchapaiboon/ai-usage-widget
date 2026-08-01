@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
 use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
+use crate::provider::ProviderSummary;
 use crate::registry::ProviderRegistry;
 use crate::scheduler::CollectionScheduler;
 use crate::storage::StorageLayer;
@@ -53,6 +54,8 @@ pub struct ProviderStatusResponse {
     pub quota_fast_resets_at: Option<String>,
     /// When the weekly window resets (RFC 3339), when known.
     pub quota_weekly_resets_at: Option<String>,
+    /// True when the reset times above were derived, not published.
+    pub quota_resets_estimated: bool,
 }
 
 /// Result of triggering an immediate collection cycle.
@@ -147,32 +150,41 @@ pub async fn get_usage_history(
         .map_err(|e| format!("Failed to get usage history: {}", e))
 }
 
+/// Convert one provider summary into its wire representation.
+///
+/// Split out of the command so the mapping is reachable from tests: a field
+/// hardcoded here rather than read off the summary — `quota_resets_estimated`
+/// especially — would otherwise pass every test in the suite while telling the
+/// UI the wrong thing.
+pub fn provider_status_response(summary: ProviderSummary) -> ProviderStatusResponse {
+    ProviderStatusResponse {
+        provider_id: summary.provider_id,
+        display_name: summary.display_name,
+        is_available: summary.is_available,
+        last_collection: summary.last_activity.map(|dt| dt.to_rfc3339()),
+        events_collected: summary.tokens_today.unwrap_or(0),
+        errors: Vec::new(),
+        quota_fast_pct: summary.quota.as_ref().and_then(|q| q.fast_hours_pct),
+        quota_standard_pct: summary.quota.as_ref().and_then(|q| q.standard_pct),
+        quota_excess_pct: summary.quota.as_ref().and_then(|q| q.excess_pct),
+        tokens_today: summary.tokens_today,
+        quota_fast_resets_at: summary.quota_resets.fast_hours.map(|dt| dt.to_rfc3339()),
+        quota_weekly_resets_at: summary.quota_resets.weekly.map(|dt| dt.to_rfc3339()),
+        quota_resets_estimated: summary.quota_resets.estimated,
+    }
+}
+
 /// Return status of all registered providers.
 #[tauri::command]
 pub async fn get_provider_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ProviderStatusResponse>, String> {
-    let summaries = state.registry.get_all_summaries();
-
-    let responses: Vec<ProviderStatusResponse> = summaries
+    Ok(state
+        .registry
+        .get_all_summaries()
         .into_iter()
-        .map(|s| ProviderStatusResponse {
-            provider_id: s.provider_id,
-            display_name: s.display_name,
-            is_available: s.is_available,
-            last_collection: s.last_activity.map(|dt| dt.to_rfc3339()),
-            events_collected: s.tokens_today.unwrap_or(0),
-            errors: Vec::new(),
-            quota_fast_pct: s.quota.as_ref().and_then(|q| q.fast_hours_pct),
-            quota_standard_pct: s.quota.as_ref().and_then(|q| q.standard_pct),
-            quota_excess_pct: s.quota.as_ref().and_then(|q| q.excess_pct),
-            tokens_today: s.tokens_today,
-            quota_fast_resets_at: s.quota_resets.fast_hours.map(|dt| dt.to_rfc3339()),
-            quota_weekly_resets_at: s.quota_resets.weekly.map(|dt| dt.to_rfc3339()),
-        })
-        .collect();
-
-    Ok(responses)
+        .map(provider_status_response)
+        .collect())
 }
 
 /// Open (or focus) the dashboard window on the given tab.
@@ -238,7 +250,10 @@ pub fn set_widget_collapsed(
         state.window_manager.remember_expanded_height(current.height);
         (COLLAPSED_WIDGET_HEIGHT, COLLAPSED_WIDGET_HEIGHT)
     } else {
-        (150.0, state.window_manager.take_expanded_height())
+        (
+            crate::window::WindowManager::MIN_PERSISTABLE_HEIGHT as f64,
+            state.window_manager.take_expanded_height(),
+        )
     };
 
     // Order matters: the minimum has to allow the new height before we ask for it
@@ -690,5 +705,62 @@ mod prop_tests_version_comparison {
             let result_reverse = compare_versions(&release, &prerelease);
             prop_assert!(result_reverse.is_none(), "Release {} should not indicate update to pre-release {}", release, prerelease);
         }
+    }
+}
+
+#[cfg(test)]
+mod provider_status_mapping_tests {
+    use super::*;
+    use crate::provider::QuotaResets;
+    use chrono::{Duration, Utc};
+
+    fn summary(quota_resets: QuotaResets) -> ProviderSummary {
+        ProviderSummary {
+            provider_id: "codex".to_string(),
+            display_name: "Codex Desktop".to_string(),
+            is_available: true,
+            current_model: None,
+            tokens_today: None,
+            quota: None,
+            context_window: None,
+            last_activity: None,
+            quota_resets,
+        }
+    }
+
+    #[test]
+    fn test_estimated_flag_is_carried_to_the_ui_not_assumed() {
+        // Claude's reset times are reconstructed from its usage history, and
+        // the widget marks them "~" on the strength of this flag alone. A
+        // constant here would silently present a guess as a published fact.
+        let resets = QuotaResets {
+            fast_hours: Some(Utc::now() + Duration::hours(3)),
+            weekly: None,
+            estimated: true,
+        };
+        assert!(provider_status_response(summary(resets)).quota_resets_estimated);
+
+        let published = QuotaResets {
+            fast_hours: Some(Utc::now() + Duration::hours(3)),
+            weekly: None,
+            estimated: false,
+        };
+        assert!(!provider_status_response(summary(published)).quota_resets_estimated);
+    }
+
+    #[test]
+    fn test_reset_times_are_serialised_per_window() {
+        // The two windows expire independently; crossing them would tell the
+        // user a weekly wait is hours away, or the reverse.
+        let fast = Utc::now() + Duration::hours(2);
+        let weekly = Utc::now() + Duration::days(5);
+        let response = provider_status_response(summary(QuotaResets {
+            fast_hours: Some(fast),
+            weekly: Some(weekly),
+            estimated: false,
+        }));
+
+        assert_eq!(response.quota_fast_resets_at, Some(fast.to_rfc3339()));
+        assert_eq!(response.quota_weekly_resets_at, Some(weekly.to_rfc3339()));
     }
 }
