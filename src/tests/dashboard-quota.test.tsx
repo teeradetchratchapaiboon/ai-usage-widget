@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
 import { useAppStore } from "../store";
@@ -230,6 +230,82 @@ describe("Dashboard current quota", () => {
     expect(screen.queryByText(/freshness\./)).toBeNull();
 
     await i18n.changeLanguage("en");
+  });
+});
+
+describe("Dashboard custom range", () => {
+  beforeEach(async () => {
+    resetStore();
+    mockDefaults();
+    await i18n.changeLanguage("en");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function selectCustom() {
+    await renderDashboard();
+    await act(async () => {
+      screen.getByText("Custom").click();
+    });
+  }
+
+  it("offers real date inputs rather than a button meaning 'last 7 days'", async () => {
+    await selectCustom();
+
+    const start = document.getElementById("range-start") as HTMLInputElement;
+    const end = document.getElementById("range-end") as HTMLInputElement;
+
+    expect(start?.type).toBe("datetime-local");
+    expect(end?.type).toBe("datetime-local");
+    expect(start.value).not.toBe("");
+  });
+
+  it("rejects a range whose start is not before its end", async () => {
+    await selectCustom();
+
+    const before = mockInvoke.mock.calls.filter((c) => c[0] === "get_usage_history").length;
+
+    await act(async () => {
+      fireEvent.change(document.getElementById("range-start")!, {
+        target: { value: "2026-08-10T10:00" },
+      });
+      fireEvent.change(document.getElementById("range-end")!, {
+        target: { value: "2026-08-01T10:00" },
+      });
+    });
+
+    // Visible complaint, and no silent fall back to a seven-day window
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The start must be before the end",
+    );
+    const after = mockInvoke.mock.calls.filter((c) => c[0] === "get_usage_history").length;
+    expect(after).toBe(before);
+  });
+
+  it("queries the range the user actually typed", async () => {
+    await selectCustom();
+
+    await act(async () => {
+      fireEvent.change(document.getElementById("range-start")!, {
+        target: { value: "2026-07-20T00:00" },
+      });
+      fireEvent.change(document.getElementById("range-end")!, {
+        target: { value: "2026-07-25T00:00" },
+      });
+    });
+
+    await waitFor(() => {
+      const call = mockInvoke.mock.calls.filter((c) => c[0] === "get_usage_history").pop();
+      expect(call).toBeTruthy();
+      const args = call![1] as { start: string; end: string };
+      // Bangkok is UTC+7, so 00:00 local is 17:00 the previous day in UTC
+      expect(args.start).toBe("2026-07-19T17:00:00.000Z");
+      expect(args.end).toBe("2026-07-24T17:00:00.000Z");
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

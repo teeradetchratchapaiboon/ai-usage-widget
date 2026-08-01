@@ -111,6 +111,72 @@ fn test_a_null_limit_family_does_not_refresh_a_valid_reading() {
 }
 
 #[test]
+fn test_a_record_with_no_timestamp_yields_unknown_not_fresh() {
+    // The collection path falls back to `Utc::now()` for a missing timestamp
+    // when dating *usage events*. That fallback must not reach the quota
+    // observation, or an undated record would read as just-written.
+    let dir = tempfile::tempdir().unwrap();
+    let undated = format!(
+        r#"{{"type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"total_tokens":10}}}},"rate_limits":{}}}}}"#,
+        FAST_ONLY
+    );
+    let adapter = adapter_with_lines(dir.path(), &[undated]);
+    adapter.collect(None).unwrap();
+
+    let observed = adapter.quota_observed();
+    assert_eq!(observed.fast_hours, None, "no timestamp means no known age");
+
+    let timing = QuotaTiming {
+        observed_at: observed.fast_hours,
+        resets_at: Some(at("2026-08-08T12:00:00Z")),
+    };
+    assert_eq!(
+        timing.freshness(at("2026-08-01T12:00:00Z")),
+        Freshness::Unknown
+    );
+}
+
+#[test]
+fn test_an_unparseable_timestamp_yields_unknown_not_fresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = adapter_with_lines(dir.path(), &[line("not-a-timestamp", FAST_ONLY)]);
+    adapter.collect(None).unwrap();
+
+    assert_eq!(adapter.quota_observed().fast_hours, None);
+}
+
+#[test]
+fn test_an_unparseable_timestamp_does_not_inherit_an_earlier_valid_age() {
+    // The percentage is new but its age is genuinely unknown. Keeping the
+    // previous record's timestamp would date this reading to a moment that
+    // did not produce it — a quieter version of the same lie.
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = adapter_with_lines(
+        dir.path(),
+        &[
+            line("2026-07-30T10:00:00.000Z", FAST_ONLY),
+            line(
+                "garbage",
+                r#"{"limit_id":"codex","primary":{"used_percent":88.0,"window_minutes":300,"resets_at":1785922677},"secondary":null}"#,
+            ),
+        ],
+    );
+    adapter.collect(None).unwrap();
+
+    let summary = adapter.get_current_summary().unwrap();
+    assert_eq!(
+        summary.quota.and_then(|q| q.fast_hours_pct),
+        Some(88.0),
+        "the newer percentage is still adopted"
+    );
+    assert_eq!(
+        adapter.quota_observed().fast_hours,
+        None,
+        "but its age is unknown, not the previous record's"
+    );
+}
+
+#[test]
 fn test_a_cycle_with_no_new_payload_leaves_the_age_alone() {
     // Collect Now on a quiet machine must not make an old reading look new.
     let dir = tempfile::tempdir().unwrap();
@@ -201,4 +267,52 @@ fn test_a_reading_whose_window_already_rolled_over_is_expired() {
 
     // Written a minute ago, but it describes a window that has since ended
     assert_eq!(timing.freshness(now), Freshness::Expired);
+}
+
+#[test]
+fn test_new_metadata_is_readable_by_the_old_contract() {
+    // Rollback safety: an older binary deserialises this branch's snapshot
+    // with serde ignoring the two unknown keys. Nothing about the extra
+    // fields can make the old shape unreadable, so reverting the PR needs no
+    // database repair.
+    #[derive(serde::Deserialize)]
+    struct LegacySnapshot {
+        fast_used_pct: Option<f64>,
+        weekly_used_pct: Option<f64>,
+        #[serde(default)]
+        weekly_resets_at: Option<DateTime<Utc>>,
+    }
+
+    let new_snapshot = RateLimitSnapshot {
+        fast_used_pct: Some(40.0),
+        fast_resets_at: None,
+        weekly_used_pct: Some(100.0),
+        weekly_resets_at: Some(at("2026-08-08T12:00:00Z")),
+        fast_observed_at: Some(at("2026-08-01T11:00:00Z")),
+        weekly_observed_at: Some(at("2026-07-30T12:00:00Z")),
+    };
+    let json = serde_json::to_string(&new_snapshot).unwrap();
+
+    let legacy: LegacySnapshot = serde_json::from_str(&json).expect("old shape still parses");
+    assert_eq!(legacy.fast_used_pct, Some(40.0));
+    assert_eq!(legacy.weekly_used_pct, Some(100.0));
+    assert_eq!(legacy.weekly_resets_at, Some(at("2026-08-08T12:00:00Z")));
+}
+
+#[test]
+fn test_a_round_trip_through_persistence_keeps_the_observed_times() {
+    let snapshot = RateLimitSnapshot {
+        fast_used_pct: Some(40.0),
+        fast_resets_at: None,
+        weekly_used_pct: Some(100.0),
+        weekly_resets_at: None,
+        fast_observed_at: Some(at("2026-08-01T11:00:00Z")),
+        weekly_observed_at: Some(at("2026-07-30T12:00:00Z")),
+    };
+
+    let restored: RateLimitSnapshot =
+        serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+
+    assert_eq!(restored.fast_observed_at, snapshot.fast_observed_at);
+    assert_eq!(restored.weekly_observed_at, snapshot.weekly_observed_at);
 }

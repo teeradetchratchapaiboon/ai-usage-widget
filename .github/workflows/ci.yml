@@ -57,9 +57,14 @@ jobs:
       # The frontend build output is not needed for `cargo test`, but
       # tauri::generate_context! reads tauri.conf.json and expects the
       # frontendDist directory to exist.
+      # PowerShell rather than bash: this is a Windows runner, so using the
+      # default shell drops a dependency on Git Bash being on PATH.
       - name: Prepare dist placeholder
-        shell: bash
-        run: mkdir -p ../dist && touch ../dist/index.html
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist | Out-Null
+          if (-not (Test-Path ../dist/index.html)) {
+            New-Item -ItemType File -Path ../dist/index.html | Out-Null
+          }
 
       - name: Format check
         run: cargo fmt --check
