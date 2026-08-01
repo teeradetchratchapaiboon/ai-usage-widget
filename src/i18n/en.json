@@ -40,7 +40,9 @@
     "output": "Output Tokens",
     "total": "Total Tokens",
     "reasoning": "Reasoning Tokens",
-    "cachedInput": "Cached Input"
+    "cachedInput": "Cached Input",
+    "unavailable": "N/A",
+    "unavailableWhy": "Not stored by the aggregated history query"
   },
   "quota": {
     "fastHours": "5-hour",
@@ -51,7 +53,11 @@
     "used": "Quota used",
     "resetsAt": "Resets",
     "remaining": "Quota left",
-    "estimated": "Estimated from usage history — Claude does not publish reset times"
+    "estimated": "Estimated from usage history — Claude does not publish reset times",
+    "current": "Current quota",
+    "fastCode": "5h",
+    "weeklyCode": "W",
+    "excessCode": "X"
   },
   "notification": {
     "usageWarning": "Usage warning: {{provider}} at {{pct}}%",
@@ -107,5 +113,32 @@
   },
   "window": {
     "maximize": "Maximize / restore"
+  },
+  "freshness": {
+    "fresh": "Live",
+    "aging": "Recent",
+    "stale": "Old data",
+    "expired": "Window ended",
+    "unknown": "Age unknown",
+    "updatedAgo": "Updated {{age}} ago",
+    "lastKnown": "Last known value",
+    "lastKnownAgo": "Last known, updated {{age}} ago",
+    "waitingForReading": "Waiting for a new quota reading",
+    "ageUnknown": "Reading age unknown",
+    "justNow": "just now",
+    "dataAge": "Data age",
+    "observedAt": "Reading taken"
+  },
+  "collect": {
+    "now": "Collect Now",
+    "collecting": "Collecting…",
+    "failed": "Collection failed",
+    "explain": "Re-reads the local files. It cannot ask the provider for a new quota."
+  },
+  "range": {
+    "start": "From",
+    "end": "To",
+    "apply": "Apply",
+    "invalid": "The start must be before the end"
   }
 }

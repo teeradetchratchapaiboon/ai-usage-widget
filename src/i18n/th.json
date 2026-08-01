@@ -40,7 +40,9 @@
     "output": "Token ส่งออก",
     "total": "Token ทั้งหมด",
     "reasoning": "Token การให้เหตุผล",
-    "cachedInput": "Token แคช"
+    "cachedInput": "Token แคช",
+    "unavailable": "ไม่มีข้อมูล",
+    "unavailableWhy": "ฐานข้อมูลสรุปไม่ได้เก็บค่านี้ไว้"
   },
   "quota": {
     "fastHours": "5 ชม.",
@@ -51,7 +53,11 @@
     "used": "โควตาที่ใช้",
     "resetsAt": "รีเซ็ต",
     "remaining": "คงเหลือ",
-    "estimated": "ประมาณจากประวัติการใช้ — Claude ไม่ได้บอกเวลารีเซ็ตมา"
+    "estimated": "ประมาณจากประวัติการใช้ — Claude ไม่ได้บอกเวลารีเซ็ตมา",
+    "current": "โควตาปัจจุบัน",
+    "fastCode": "5ชม",
+    "weeklyCode": "สัปดาห์",
+    "excessCode": "เกิน"
   },
   "notification": {
     "usageWarning": "คำเตือนการใช้งาน: {{provider}} ที่ {{pct}}%",
@@ -104,5 +110,32 @@
   },
   "window": {
     "maximize": "ขยาย / ย่อกลับ"
+  },
+  "freshness": {
+    "fresh": "สด",
+    "aging": "ล่าสุด",
+    "stale": "ข้อมูลเก่า",
+    "expired": "รอบหมดแล้ว",
+    "unknown": "ไม่ทราบอายุ",
+    "updatedAgo": "อัปเดตเมื่อ {{age}} ที่แล้ว",
+    "lastKnown": "ค่าล่าสุดที่ทราบ",
+    "lastKnownAgo": "ข้อมูลเก่า {{age}} ที่แล้ว",
+    "waitingForReading": "รอค่าโควตาใหม่",
+    "ageUnknown": "ไม่ทราบว่าอ่านมาเมื่อไหร่",
+    "justNow": "เมื่อครู่",
+    "dataAge": "อายุข้อมูล",
+    "observedAt": "อ่านค่าเมื่อ"
+  },
+  "collect": {
+    "now": "เก็บข้อมูลเดี๋ยวนี้",
+    "collecting": "กำลังเก็บข้อมูล…",
+    "failed": "เก็บข้อมูลไม่สำเร็จ",
+    "explain": "อ่านไฟล์ในเครื่องใหม่ ไม่ได้ไปถามโควตาใหม่จากผู้ให้บริการ"
+  },
+  "range": {
+    "start": "ตั้งแต่",
+    "end": "ถึง",
+    "apply": "ใช้ช่วงนี้",
+    "invalid": "เวลาเริ่มต้องมาก่อนเวลาสิ้นสุด"
   }
 }

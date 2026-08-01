@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
-use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
+use crate::freshness::QuotaTiming;
 use crate::provider::ProviderSummary;
+use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::registry::ProviderRegistry;
 use crate::scheduler::CollectionScheduler;
 use crate::storage::StorageLayer;
@@ -41,8 +42,12 @@ pub struct ProviderStatusResponse {
     pub provider_id: String,
     pub display_name: String,
     pub is_available: bool,
-    pub last_collection: Option<String>,
-    pub events_collected: u64,
+    /// Most recent activity the provider itself reports (RFC 3339).
+    ///
+    /// Renamed from `last_collection`, which it never was: nothing here
+    /// describes a collection attempt, and the old name invited reading it as
+    /// the age of the quota — a question `quota_*_observed_at` answers.
+    pub last_activity: Option<String>,
     pub errors: Vec<String>,
     /// Quota consumed, in percent, for providers that publish quota data.
     pub quota_fast_pct: Option<f64>,
@@ -55,7 +60,21 @@ pub struct ProviderStatusResponse {
     /// When the weekly window resets (RFC 3339), when known.
     pub quota_weekly_resets_at: Option<String>,
     /// True when the reset times above were derived, not published.
+    ///
+    /// Confidence in the *reset time* only. It is independent of freshness,
+    /// which is confidence in the *percentage*: Codex publishes an exact reset
+    /// for a number that may be two days old, Claude infers a reset for one
+    /// written a minute ago.
     pub quota_resets_estimated: bool,
+    /// When the source record supplying each percentage was written (RFC 3339).
+    pub quota_fast_observed_at: Option<String>,
+    pub quota_weekly_observed_at: Option<String>,
+    /// Per-window freshness: `fresh` | `aging` | `stale` | `expired` | `unknown`.
+    pub quota_fast_freshness: String,
+    pub quota_weekly_freshness: String,
+    /// Age of each reading in whole seconds, when it can be determined.
+    pub quota_fast_age_secs: Option<i64>,
+    pub quota_weekly_age_secs: Option<i64>,
 }
 
 /// Result of triggering an immediate collection cycle.
@@ -94,9 +113,7 @@ pub struct UpdateInfo {
 
 /// Query the storage layer for today's/this week's usage summary.
 #[tauri::command]
-pub async fn get_current_usage(
-    state: tauri::State<'_, AppState>,
-) -> Result<UsageSummary, String> {
+pub async fn get_current_usage(state: tauri::State<'_, AppState>) -> Result<UsageSummary, String> {
     state
         .storage
         .get_current_summary()
@@ -127,10 +144,12 @@ pub async fn get_usage_history(
         "daily" => Granularity::Daily,
         "weekly" => Granularity::Weekly,
         "monthly" => Granularity::Monthly,
-        other => return Err(format!(
-            "Invalid granularity '{}': must be one of hourly, daily, weekly, monthly",
-            other
-        )),
+        other => {
+            return Err(format!(
+                "Invalid granularity '{}': must be one of hourly, daily, weekly, monthly",
+                other
+            ))
+        }
     };
 
     // Construct and validate time range
@@ -139,8 +158,7 @@ pub async fn get_usage_history(
         end: end_dt,
     };
 
-    validate_time_range(&range)
-        .map_err(|e| format!("Time range validation failed: {}", e))?;
+    validate_time_range(&range).map_err(|e| format!("Time range validation failed: {}", e))?;
 
     // Query storage
     state
@@ -150,19 +168,43 @@ pub async fn get_usage_history(
         .map_err(|e| format!("Failed to get usage history: {}", e))
 }
 
+/// Per-window timings taken straight off a summary.
+///
+/// Built in one place so the widget and the dashboard cannot disagree about
+/// which reset time belongs to which observation.
+pub fn quota_timings(summary: &ProviderSummary) -> (QuotaTiming, QuotaTiming) {
+    (
+        QuotaTiming {
+            observed_at: summary.quota_observed.fast_hours,
+            resets_at: summary.quota_resets.fast_hours,
+        },
+        QuotaTiming {
+            observed_at: summary.quota_observed.weekly,
+            resets_at: summary.quota_resets.weekly,
+        },
+    )
+}
+
 /// Convert one provider summary into its wire representation.
 ///
 /// Split out of the command so the mapping is reachable from tests: a field
 /// hardcoded here rather than read off the summary — `quota_resets_estimated`
-/// especially — would otherwise pass every test in the suite while telling the
-/// UI the wrong thing.
-pub fn provider_status_response(summary: ProviderSummary) -> ProviderStatusResponse {
+/// and the freshness fields especially — would otherwise pass every test in
+/// the suite while telling the UI the wrong thing.
+///
+/// `now` is a parameter so tests can pin the clock. It is used *only* to
+/// classify freshness; it never becomes an observation timestamp.
+pub fn provider_status_response_at(
+    summary: ProviderSummary,
+    now: DateTime<Utc>,
+) -> ProviderStatusResponse {
+    let (fast, weekly) = quota_timings(&summary);
+
     ProviderStatusResponse {
         provider_id: summary.provider_id,
         display_name: summary.display_name,
         is_available: summary.is_available,
-        last_collection: summary.last_activity.map(|dt| dt.to_rfc3339()),
-        events_collected: summary.tokens_today.unwrap_or(0),
+        last_activity: summary.last_activity.map(|dt| dt.to_rfc3339()),
         errors: Vec::new(),
         quota_fast_pct: summary.quota.as_ref().and_then(|q| q.fast_hours_pct),
         quota_standard_pct: summary.quota.as_ref().and_then(|q| q.standard_pct),
@@ -171,7 +213,18 @@ pub fn provider_status_response(summary: ProviderSummary) -> ProviderStatusRespo
         quota_fast_resets_at: summary.quota_resets.fast_hours.map(|dt| dt.to_rfc3339()),
         quota_weekly_resets_at: summary.quota_resets.weekly.map(|dt| dt.to_rfc3339()),
         quota_resets_estimated: summary.quota_resets.estimated,
+        quota_fast_observed_at: fast.observed_at.map(|dt| dt.to_rfc3339()),
+        quota_weekly_observed_at: weekly.observed_at.map(|dt| dt.to_rfc3339()),
+        quota_fast_freshness: fast.freshness(now).as_str().to_string(),
+        quota_weekly_freshness: weekly.freshness(now).as_str().to_string(),
+        quota_fast_age_secs: fast.age_seconds(now),
+        quota_weekly_age_secs: weekly.age_seconds(now),
     }
+}
+
+/// [`provider_status_response_at`] against the wall clock.
+pub fn provider_status_response(summary: ProviderSummary) -> ProviderStatusResponse {
+    provider_status_response_at(summary, Utc::now())
 }
 
 /// Return status of all registered providers.
@@ -276,7 +329,9 @@ pub async fn set_widget_collapsed(
         .to_logical::<f64>(scale);
 
     let (min_height, height) = if collapsed {
-        state.window_manager.remember_expanded_height(current.height);
+        state
+            .window_manager
+            .remember_expanded_height(current.height);
         (
             WindowManager::COLLAPSED_HEIGHT as f64,
             WindowManager::COLLAPSED_HEIGHT as f64,
@@ -321,7 +376,10 @@ pub async fn trigger_collection(
 
     for outcome in outcomes {
         match outcome {
-            crate::registry::ProviderCollectionOutcome::Success { provider_id, result } => {
+            crate::registry::ProviderCollectionOutcome::Success {
+                provider_id,
+                result,
+            } => {
                 providers_collected += 1;
                 log::info!(
                     "Trigger collection: provider '{}' returned {} events",
@@ -377,9 +435,7 @@ pub async fn trigger_collection(
 
 /// Read current application settings.
 #[tauri::command]
-pub async fn get_settings(
-    state: tauri::State<'_, AppState>,
-) -> Result<AppSettings, String> {
+pub async fn get_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings, String> {
     let config = state.config.lock().await;
 
     Ok(AppSettings {
@@ -406,8 +462,7 @@ pub async fn update_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // Validate inputs before applying
-    validate_settings(&settings)
-        .map_err(|e| format!("Settings validation failed: {}", e))?;
+    validate_settings(&settings).map_err(|e| format!("Settings validation failed: {}", e))?;
 
     let mut config = state.config.lock().await;
 
@@ -470,9 +525,7 @@ pub async fn update_settings(
         let result = if enabled {
             std::env::current_exe()
                 .map_err(|e| format!("Cannot resolve executable path: {}", e))
-                .and_then(|exe| {
-                    crate::tray::register_autostart(&exe).map_err(|e| e.to_string())
-                })
+                .and_then(|exe| crate::tray::register_autostart(&exe).map_err(|e| e.to_string()))
         } else {
             crate::tray::unregister_autostart().map_err(|e| e.to_string())
         };
@@ -489,10 +542,7 @@ pub async fn update_settings(
 
 /// Trigger backup to specified path.
 #[tauri::command]
-pub async fn backup_data(
-    path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn backup_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     if path.is_empty() {
         return Err("Backup path must not be empty".to_string());
     }
@@ -508,10 +558,7 @@ pub async fn backup_data(
 
 /// Restore from backup file.
 #[tauri::command]
-pub async fn restore_data(
-    path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn restore_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     if path.is_empty() {
         return Err("Restore path must not be empty".to_string());
     }
@@ -535,8 +582,12 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let current_version = env!("CARGO_PKG_VERSION");
 
     // Fail fast if our own version is not valid semver
-    semver::Version::parse(current_version)
-        .map_err(|e| format!("Failed to parse current version '{}': {}", current_version, e))?;
+    semver::Version::parse(current_version).map_err(|e| {
+        format!(
+            "Failed to parse current version '{}': {}",
+            current_version, e
+        )
+    })?;
 
     // Every outbound request goes through the network guard: only
     // api.github.com is reachable, provider APIs are blocked outright.
@@ -595,7 +646,6 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     }
 }
 
-
 // ─── Testable Helper Functions ──────────────────────────────────────────────────
 
 /// Compare two version strings and report the newer one.
@@ -627,7 +677,11 @@ mod prop_tests_version_comparison {
 
     /// Strategy to generate a valid semver version string "major.minor.patch"
     fn semver_version() -> impl Strategy<Value = String> {
-        (version_component(), version_component(), version_component())
+        (
+            version_component(),
+            version_component(),
+            version_component(),
+        )
             .prop_map(|(major, minor, patch)| format!("{}.{}.{}", major, minor, patch))
     }
 
@@ -741,6 +795,10 @@ mod prop_tests_version_comparison {
 }
 
 #[cfg(test)]
+#[path = "commands_freshness_tests.rs"]
+mod provider_status_freshness_tests;
+
+#[cfg(test)]
 mod provider_status_mapping_tests {
     use super::*;
     use crate::provider::QuotaResets;
@@ -757,6 +815,7 @@ mod provider_status_mapping_tests {
             context_window: None,
             last_activity: None,
             quota_resets,
+            quota_observed: Default::default(),
         }
     }
 

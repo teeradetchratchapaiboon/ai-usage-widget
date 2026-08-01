@@ -26,10 +26,7 @@ impl ReconciliationEngine {
     /// Events are sorted by timestamp first, then grouped by identity key.
     /// Two events belong to the same group if they share provider_id + model
     /// and their timestamps differ by at most 1 second.
-    pub fn group_by_identity(
-        &self,
-        mut events: Vec<RawUsageEvent>,
-    ) -> Vec<Vec<RawUsageEvent>> {
+    pub fn group_by_identity(&self, mut events: Vec<RawUsageEvent>) -> Vec<Vec<RawUsageEvent>> {
         if events.is_empty() {
             return Vec::new();
         }
@@ -100,14 +97,12 @@ impl ReconciliationEngine {
             (None, None) => None,
             (Some(qa), None) => Some(qa.clone()),
             (None, Some(qb)) => Some(qb.clone()),
-            (Some(qa), Some(qb)) => {
-                Some(QuotaUsage {
-                    fast_hours_pct: qb.fast_hours_pct.or(qa.fast_hours_pct),
-                    standard_pct: qb.standard_pct.or(qa.standard_pct),
-                    excess_pct: qb.excess_pct.or(qa.excess_pct),
-                    daily_tokens: qb.daily_tokens.or(qa.daily_tokens),
-                })
-            }
+            (Some(qa), Some(qb)) => Some(QuotaUsage {
+                fast_hours_pct: qb.fast_hours_pct.or(qa.fast_hours_pct),
+                standard_pct: qb.standard_pct.or(qa.standard_pct),
+                excess_pct: qb.excess_pct.or(qa.excess_pct),
+                daily_tokens: qb.daily_tokens.or(qa.daily_tokens),
+            }),
         }
     }
 
@@ -301,18 +296,8 @@ mod tests {
         let engine = ReconciliationEngine::new();
         let ts = Utc::now();
 
-        let e1 = make_event_at(
-            "codex",
-            Some("gpt-4"),
-            ts,
-            TokenUsage::default(),
-        );
-        let e2 = make_event_at(
-            "codex",
-            Some("gpt-3.5"),
-            ts,
-            TokenUsage::default(),
-        );
+        let e1 = make_event_at("codex", Some("gpt-4"), ts, TokenUsage::default());
+        let e2 = make_event_at("codex", Some("gpt-3.5"), ts, TokenUsage::default());
 
         let groups = engine.group_by_identity(vec![e1, e2]);
         assert_eq!(groups.len(), 2);
@@ -323,12 +308,7 @@ mod tests {
         let engine = ReconciliationEngine::new();
         let ts = Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap();
 
-        let e1 = make_event_at(
-            "codex",
-            Some("gpt-4"),
-            ts,
-            TokenUsage::default(),
-        );
+        let e1 = make_event_at("codex", Some("gpt-4"), ts, TokenUsage::default());
         let e2 = make_event_at(
             "codex",
             Some("gpt-4"),
@@ -396,9 +376,9 @@ mod tests {
         let result = ReconciliationEngine::merge_quota(&qa, &qb);
         let merged = result.unwrap();
         assert_eq!(merged.fast_hours_pct, Some(50.0)); // from qa (qb is None)
-        assert_eq!(merged.standard_pct, Some(30.0));   // from qb
-        assert_eq!(merged.excess_pct, Some(10.0));     // from qb
-        assert_eq!(merged.daily_tokens, Some(1000));   // from qa (qb is None)
+        assert_eq!(merged.standard_pct, Some(30.0)); // from qb
+        assert_eq!(merged.excess_pct, Some(10.0)); // from qb
+        assert_eq!(merged.daily_tokens, Some(1000)); // from qa (qb is None)
     }
 
     #[test]
@@ -533,15 +513,13 @@ mod prop_tests_reconciliation {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     /// Strategy to generate arbitrary QuotaUsage values.
@@ -562,8 +540,7 @@ mod prop_tests_reconciliation {
 
     /// Strategy to generate a valid UTC timestamp within a reasonable range.
     fn arb_timestamp() -> impl Strategy<Value = chrono::DateTime<Utc>> {
-        (1577836800i64..1893456000i64)
-            .prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
+        (1577836800i64..1893456000i64).prop_map(|secs| Utc.timestamp_opt(secs, 0).unwrap())
     }
 
     /// Strategy to generate an optional model string.
@@ -596,28 +573,26 @@ mod prop_tests_reconciliation {
                 2..=5,
             ),
         )
-            .prop_map(
-                |(provider_id, model, event_type, base_ts, event_params)| {
-                    event_params
-                        .into_iter()
-                        .map(|(tokens, quota, ctx_window, session, project, ms_offset)| {
-                            RawUsageEvent {
-                                provider_id: provider_id.clone(),
-                                event_type: event_type.clone(),
-                                timestamp: base_ts + Duration::milliseconds(ms_offset as i64),
-                                model: model.clone(),
-                                tokens,
-                                context_window: ctx_window,
-                                quota,
-                                session_hash: session,
-                                project_hash: project,
-                                source_file: None,
-                                raw_metadata: None,
-                            }
-                        })
-                        .collect()
-                },
-            )
+            .prop_map(|(provider_id, model, event_type, base_ts, event_params)| {
+                event_params
+                    .into_iter()
+                    .map(
+                        |(tokens, quota, ctx_window, session, project, ms_offset)| RawUsageEvent {
+                            provider_id: provider_id.clone(),
+                            event_type: event_type.clone(),
+                            timestamp: base_ts + Duration::milliseconds(ms_offset as i64),
+                            model: model.clone(),
+                            tokens,
+                            context_window: ctx_window,
+                            quota,
+                            session_hash: session,
+                            project_hash: project,
+                            source_file: None,
+                            raw_metadata: None,
+                        },
+                    )
+                    .collect()
+            })
     }
 
     /// Strategy to generate a Vec of 1-8 arbitrary events (some may group, some not).
@@ -634,38 +609,48 @@ mod prop_tests_reconciliation {
             ),
             1..8,
         )
-            .prop_map(|params| {
-                params
-                    .into_iter()
-                    .map(
-                        |(provider_id, event_type, timestamp, model, tokens, quota, ctx)| {
-                            RawUsageEvent {
-                                provider_id,
-                                event_type,
-                                timestamp,
-                                model,
-                                tokens,
-                                context_window: ctx,
-                                quota,
-                                session_hash: None,
-                                project_hash: None,
-                                source_file: None,
-                                raw_metadata: None,
-                            }
-                        },
-                    )
-                    .collect()
-            })
+        .prop_map(|params| {
+            params
+                .into_iter()
+                .map(
+                    |(provider_id, event_type, timestamp, model, tokens, quota, ctx)| {
+                        RawUsageEvent {
+                            provider_id,
+                            event_type,
+                            timestamp,
+                            model,
+                            tokens,
+                            context_window: ctx,
+                            quota,
+                            session_hash: None,
+                            project_hash: None,
+                            source_file: None,
+                            raw_metadata: None,
+                        }
+                    },
+                )
+                .collect()
+        })
     }
 
     /// Helper: count non-None fields in a TokenUsage.
     fn count_token_fields(t: &TokenUsage) -> usize {
         let mut count = 0;
-        if t.input_tokens.is_some() { count += 1; }
-        if t.cached_input_tokens.is_some() { count += 1; }
-        if t.output_tokens.is_some() { count += 1; }
-        if t.reasoning_tokens.is_some() { count += 1; }
-        if t.total_tokens.is_some() { count += 1; }
+        if t.input_tokens.is_some() {
+            count += 1;
+        }
+        if t.cached_input_tokens.is_some() {
+            count += 1;
+        }
+        if t.output_tokens.is_some() {
+            count += 1;
+        }
+        if t.reasoning_tokens.is_some() {
+            count += 1;
+        }
+        if t.total_tokens.is_some() {
+            count += 1;
+        }
         count
     }
 

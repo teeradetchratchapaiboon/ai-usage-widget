@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod dedup;
 pub mod error;
+pub mod freshness;
 pub mod network;
 pub mod notify;
 pub mod privacy;
@@ -254,8 +255,8 @@ pub fn run() {
                             crate::window::WindowManager::COLLAPSED_HEIGHT as f64,
                         )));
                     }
-                    let _ = main_window
-                        .set_size(tauri::LogicalSize::new(width as f64, height as f64));
+                    let _ =
+                        main_window.set_size(tauri::LogicalSize::new(width as f64, height as f64));
                 }
                 if let Some(position) = window_manager
                     .load_persisted_position()
@@ -287,14 +288,10 @@ pub fn run() {
 
             // Register click-through recovery shortcut (Win+Shift+U)
             let wm_shortcut = window_manager.clone();
-            window::tauri_ops::register_click_through_shortcut(
-                app.handle(),
-                wm_shortcut,
-            )
-            .unwrap_or_else(|e| {
-                log::warn!("Failed to register global shortcut: {}", e);
-            });
-
+            window::tauri_ops::register_click_through_shortcut(app.handle(), wm_shortcut)
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to register global shortcut: {}", e);
+                });
 
             // Remember where the user drags/resizes the widget to. The widget
             // has no title bar, so this is the only record of its placement.

@@ -86,8 +86,7 @@ const fixtureProviders: ProviderStatus[] = [
     provider_id: "codex",
     display_name: "Codex Desktop",
     is_available: true,
-    last_collection: new Date().toISOString(),
-    events_collected: 42,
+    last_activity: new Date().toISOString(),
     errors: [],
     // Mirrors a real Codex account whose weekly limit is the binding one: it
     // stops publishing the five-hour window entirely while that lasts.
@@ -99,13 +98,18 @@ const fixtureProviders: ProviderStatus[] = [
     quota_weekly_resets_at: new Date(Date.now() + 4 * 86400000).toISOString(),
     // Codex publishes its reset timestamps outright
     quota_resets_estimated: false,
+    quota_fast_observed_at: null,
+    quota_weekly_observed_at: new Date(Date.now() - 60_000).toISOString(),
+    quota_fast_freshness: "unknown",
+    quota_weekly_freshness: "fresh",
+    quota_fast_age_secs: null,
+    quota_weekly_age_secs: 60,
   },
   {
     provider_id: "claude",
     display_name: "Claude Desktop",
     is_available: true,
-    last_collection: new Date().toISOString(),
-    events_collected: 18,
+    last_activity: new Date().toISOString(),
     errors: [],
     quota_fast_pct: 82.5,
     quota_standard_pct: 41.0,
@@ -115,6 +119,12 @@ const fixtureProviders: ProviderStatus[] = [
     quota_weekly_resets_at: new Date(Date.now() + 3 * 86400000).toISOString(),
     // Claude publishes none, so ours are reconstructed from its history
     quota_resets_estimated: true,
+    quota_fast_observed_at: new Date(Date.now() - 120_000).toISOString(),
+    quota_weekly_observed_at: new Date(Date.now() - 120_000).toISOString(),
+    quota_fast_freshness: "fresh",
+    quota_weekly_freshness: "fresh",
+    quota_fast_age_secs: 120,
+    quota_weekly_age_secs: 120,
   },
 ];
 
@@ -175,7 +185,11 @@ function resetStore() {
     usage: null,
     providers: [],
     history: [],
-    isLoading: false,
+    usageLoading: false,
+    providerStatusLoading: false,
+    historyLoading: false,
+    collectionLoading: false,
+    settingsLoading: false,
     error: null,
     view: "compact",
     locale: "th",

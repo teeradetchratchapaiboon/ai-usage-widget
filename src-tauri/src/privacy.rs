@@ -73,7 +73,9 @@ mod tests {
     #[test]
     fn hash_string_is_lowercase_hex() {
         let result = hash_string("anything");
-        assert!(result.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(result
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]

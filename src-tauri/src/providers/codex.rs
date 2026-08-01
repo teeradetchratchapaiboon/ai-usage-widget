@@ -96,6 +96,15 @@ pub struct RateLimitSnapshot {
     pub weekly_used_pct: Option<f64>,
     #[serde(default)]
     pub weekly_resets_at: Option<DateTime<Utc>>,
+    /// Timestamp of the JSONL record that supplied `fast_used_pct`.
+    ///
+    /// Defaulted, so a snapshot persisted before this field existed loads with
+    /// an unknown age rather than silently claiming to be current.
+    #[serde(default)]
+    pub fast_observed_at: Option<DateTime<Utc>>,
+    /// Timestamp of the JSONL record that supplied `weekly_used_pct`.
+    #[serde(default)]
+    pub weekly_observed_at: Option<DateTime<Utc>>,
 }
 
 /// Longest window still counted as the short rolling limit, in minutes.
@@ -109,7 +118,17 @@ impl RateLimitSnapshot {
     /// normally, but Codex promotes the weekly limit into that slot once that
     /// is the binding one. Trusting the slot labels a weekly reset as a
     /// five-hour one — backwards for someone deciding whether to wait.
-    fn apply(&mut self, window: &RateLimitWindow, is_primary: bool) {
+    /// `observed_at` is the timestamp of the JSONL record carrying this
+    /// payload, and is stored only for the window this call actually updates.
+    /// The two windows are written at different times — Codex stops publishing
+    /// the five-hour one while the weekly limit binds — so sharing one
+    /// timestamp would credit a stale window with its neighbour's freshness.
+    fn apply(
+        &mut self,
+        window: &RateLimitWindow,
+        is_primary: bool,
+        observed_at: Option<DateTime<Utc>>,
+    ) {
         let Some(pct) = window.used_percent else {
             return;
         };
@@ -129,20 +148,34 @@ impl RateLimitSnapshot {
             if known_length || self.fast_used_pct.is_none() {
                 self.fast_used_pct = Some(pct);
                 self.fast_resets_at = resets_at;
+                self.fast_observed_at = observed_at;
             }
         } else if known_length || self.weekly_used_pct.is_none() {
             self.weekly_used_pct = Some(pct);
             self.weekly_resets_at = resets_at;
+            self.weekly_observed_at = observed_at;
         }
     }
 
     /// Apply both slots of one `rate_limits` object.
-    fn apply_limits(&mut self, limits: &RateLimits) {
+    ///
+    /// A null slot is skipped entirely: Codex sends `"secondary": null` while
+    /// the weekly limit is the binding one, and treating that as an update
+    /// would refresh the age of a window it said nothing about.
+    fn apply_limits(&mut self, limits: &RateLimits, observed_at: Option<DateTime<Utc>>) {
         if let Some(primary) = limits.primary.as_ref() {
-            self.apply(primary, true);
+            self.apply(primary, true, observed_at);
         }
         if let Some(secondary) = limits.secondary.as_ref() {
-            self.apply(secondary, false);
+            self.apply(secondary, false, observed_at);
+        }
+    }
+
+    /// Source timestamps for whichever windows currently hold a percentage.
+    fn observations(&self) -> crate::provider::QuotaObservations {
+        crate::provider::QuotaObservations {
+            fast_hours: self.fast_observed_at,
+            weekly: self.weekly_observed_at,
         }
     }
 
@@ -232,8 +265,7 @@ impl CodexAdapter {
                                 if let Ok(jsonl_files) = fs::read_dir(&day_path) {
                                     for f in jsonl_files.flatten() {
                                         let p = f.path();
-                                        if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
-                                        {
+                                        if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                                             files.push(p);
                                         }
                                     }
@@ -293,6 +325,15 @@ impl CodexAdapter {
             let Ok(parsed) = serde_json::from_str::<JsonlLine>(&line) else {
                 continue;
             };
+            // Parsed before the payload is moved out of `parsed`. This is the
+            // record's own timestamp — priming must not stamp a quota read off
+            // disk with the time the app happened to start.
+            let observed_at = parsed
+                .timestamp
+                .as_deref()
+                .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                .map(|dt| dt.with_timezone(&Utc));
+
             let Some(JsonlPayload::TokenCount(tc)) = parsed.payload else {
                 continue;
             };
@@ -300,7 +341,7 @@ impl CodexAdapter {
                 continue;
             };
 
-            found.apply_limits(&limits);
+            found.apply_limits(&limits, observed_at);
         }
 
         if found.has_data() {
@@ -349,10 +390,7 @@ impl CodexAdapter {
         let session_hash = hash_string(session_id);
 
         // Derive project hash from parent directory path
-        let project_hash = path
-            .parent()
-            .and_then(|p| p.to_str())
-            .map(hash_string);
+        let project_hash = path.parent().and_then(|p| p.to_str()).map(hash_string);
 
         for line_result in reader.lines() {
             let line = match line_result {
@@ -378,31 +416,35 @@ impl CodexAdapter {
                 }
             };
 
-            let timestamp = match &parsed.timestamp {
-                Some(ts) => match ts.parse::<DateTime<Utc>>() {
-                    Ok(dt) => dt,
-                    Err(_) => Utc::now(),
-                },
-                None => Utc::now(),
-            };
+            // Strictly what the record says, with no "now" fallback: a quota
+            // reading stamped with the collection time would report every
+            // stale value as current, which is the whole failure being fixed.
+            let record_observed_at = parsed
+                .timestamp
+                .as_deref()
+                .and_then(|ts| ts.parse::<DateTime<Utc>>().ok());
+
+            // Usage events keep the older lenient behaviour — an event with no
+            // usable timestamp still belongs on today's tally.
+            let timestamp = record_observed_at.unwrap_or_else(Utc::now);
 
             match (&parsed.line_type, &parsed.payload) {
-                (Some(t), Some(JsonlPayload::SessionMeta(meta)))
-                    if t == "session_meta" =>
-                {
+                (Some(t), Some(JsonlPayload::SessionMeta(meta))) if t == "session_meta" => {
                     if let Some(ref model) = meta.model {
                         current_model = Some(model.clone());
                     }
                 }
                 (Some(t), Some(JsonlPayload::TokenCount(tc)))
-                    if t == "event_msg"
-                        && tc.payload_type.as_deref() == Some("token_count") =>
+                    if t == "event_msg" && tc.payload_type.as_deref() == Some("token_count") =>
                 {
                     // Remember the newest rate limit values. Codex reports
                     // several limit families and nulls the windows that do not
                     // apply, so only non-null windows update the snapshot.
                     if let Some(ref limits) = tc.rate_limits {
-                        self.rate_limits.lock().unwrap().apply_limits(limits);
+                        self.rate_limits
+                            .lock()
+                            .unwrap()
+                            .apply_limits(limits, record_observed_at);
                     }
 
                     if let Some(ref info) = tc.info {
@@ -468,10 +510,7 @@ impl CodexAdapter {
     /// Read thread summaries from state_5.sqlite with lock retry logic.
     /// Retries 3 times with exponential backoff (100ms, 200ms, 400ms).
     /// Falls back to empty vec if database is locked or unavailable.
-    fn read_thread_summaries(
-        &self,
-        since: Option<DateTime<Utc>>,
-    ) -> Vec<RawUsageEvent> {
+    fn read_thread_summaries(&self, since: Option<DateTime<Utc>>) -> Vec<RawUsageEvent> {
         if !self.state_db_path.exists() {
             return Vec::new();
         }
@@ -501,10 +540,7 @@ impl CodexAdapter {
     }
 
     /// Attempt to read threads from the SQLite database.
-    fn try_read_threads(
-        &self,
-        since: Option<DateTime<Utc>>,
-    ) -> Result<Vec<RawUsageEvent>, String> {
+    fn try_read_threads(&self, since: Option<DateTime<Utc>>) -> Result<Vec<RawUsageEvent>, String> {
         // Use rusqlite-style synchronous access via sqlite3
         // Since sqlx is async and we need sync here, use a minimal
         // sqlite3 connection via the sqlite3 bundled in sqlx.
@@ -660,6 +696,7 @@ impl ProviderAdapter for CodexAdapter {
                 // Codex states these outright in its rate-limit payload
                 estimated: false,
             },
+            quota_observed: snapshot.observations(),
         })
     }
 
@@ -670,6 +707,10 @@ impl ProviderAdapter for CodexAdapter {
             weekly: snapshot.weekly_resets_at,
             estimated: false,
         }
+    }
+
+    fn quota_observed(&self) -> crate::provider::QuotaObservations {
+        self.rate_limits.lock().unwrap().observations()
     }
 
     fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
@@ -777,6 +818,9 @@ fn read_thread_rows(
     Ok(result)
 }
 
+#[cfg(test)]
+#[path = "codex_quota_tests.rs"]
+mod quota_observation_tests;
 
 #[cfg(test)]
 mod rate_limit_tests {
@@ -815,10 +859,7 @@ mod rate_limit_tests {
         assert_eq!(quota.standard_pct, Some(36.0));
 
         let resets = adapter.quota_resets();
-        assert_eq!(
-            resets.fast_hours.map(|dt| dt.timestamp()),
-            Some(1783893498)
-        );
+        assert_eq!(resets.fast_hours.map(|dt| dt.timestamp()), Some(1783893498));
         assert_eq!(resets.weekly.map(|dt| dt.timestamp()), Some(1784362660));
 
         // Stated by Codex, so the UI must not soften these with a "~"
@@ -855,8 +896,15 @@ mod rate_limit_tests {
         fs::create_dir_all(&day).unwrap();
 
         let line = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"model_context_window":258400},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677},"secondary":{"used_percent":42.5}}}}"#;
-        fs::write(day.join("rollout-test.jsonl"), format!("{}
-", line)).unwrap();
+        fs::write(
+            day.join("rollout-test.jsonl"),
+            format!(
+                "{}
+",
+                line
+            ),
+        )
+        .unwrap();
 
         let config = CodexConfig {
             sessions_dir: dir.path().to_path_buf(),
@@ -896,9 +944,12 @@ mod rate_limit_tests {
         let without = r#"{"timestamp":"2026-07-30T20:54:57.240Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"premium","primary":null,"secondary":null}}}"#;
         fs::write(
             day.join("rollout-test.jsonl"),
-            format!("{}
+            format!(
+                "{}
 {}
-", with_limits, without),
+",
+                with_limits, without
+            ),
         )
         .unwrap();
 
@@ -926,8 +977,15 @@ mod rate_limit_tests {
         let day = dir.path().join("2026").join("07").join("30");
         fs::create_dir_all(&day).unwrap();
         let line = r#"{"timestamp":"2026-07-30T20:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1785922677}}}}"#;
-        fs::write(day.join("rollout-test.jsonl"), format!("{}
-", line)).unwrap();
+        fs::write(
+            day.join("rollout-test.jsonl"),
+            format!(
+                "{}
+",
+                line
+            ),
+        )
+        .unwrap();
 
         let config = CodexConfig {
             sessions_dir: dir.path().to_path_buf(),

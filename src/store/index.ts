@@ -29,7 +29,19 @@ export interface AppState {
   // UI state
   view: "compact" | "dashboard";
   locale: "th" | "en";
-  isLoading: boolean;
+  /**
+   * Per-request loading flags.
+   *
+   * One shared boolean did not survive concurrent requests: the widget fires
+   * usage and provider-status together every 10 s, and whichever returned
+   * first cleared the flag for both, so a skeleton could vanish while its own
+   * request was still in flight.
+   */
+  usageLoading: boolean;
+  providerStatusLoading: boolean;
+  historyLoading: boolean;
+  collectionLoading: boolean;
+  settingsLoading: boolean;
   error: string | null;
 
   // Actions
@@ -56,59 +68,90 @@ export const useAppStore = create<AppState>((set) => ({
   // Initial UI state
   view: "compact",
   locale: "th",
-  isLoading: false,
+  usageLoading: false,
+  providerStatusLoading: false,
+  historyLoading: false,
+  collectionLoading: false,
+  settingsLoading: false,
   error: null,
 
   // Actions
   fetchUsage: async () => {
-    set({ isLoading: true, error: null });
+    set({ usageLoading: true, error: null });
     try {
       const usage = await getCurrentUsage();
-      set({ usage, isLoading: false });
+      set({ usage, usageLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      set({ error: String(e), usageLoading: false });
     }
   },
 
   fetchHistory: async (start: string, end: string, granularity: string) => {
-    set({ isLoading: true, error: null });
+    set({ historyLoading: true, error: null });
     try {
       const history = await getUsageHistory(start, end, granularity);
-      set({ history, isLoading: false });
+      set({ history, historyLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      set({ error: String(e), historyLoading: false });
     }
   },
 
   fetchProviderStatus: async () => {
-    set({ isLoading: true, error: null });
+    set({ providerStatusLoading: true, error: null });
     try {
       const providers = await getProviderStatus();
-      set({ providers, isLoading: false });
+      set({ providers, providerStatusLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      set({ error: String(e), providerStatusLoading: false });
     }
   },
 
   triggerCollection: async () => {
-    set({ isLoading: true, error: null });
+    set({ collectionLoading: true, error: null });
+
+    // Collection rewrites both the stored usage and the quota snapshot, so
+    // both have to be re-read. Refreshing only usage left the dashboard's
+    // quota cards showing pre-collection values after Collect Now.
+    //
+    // Each refresh is settled independently so one failure still delivers the
+    // other's data, and both failures are reported rather than the last one.
     try {
       await triggerCollection();
-      // Refresh usage data after collection
-      const usage = await getCurrentUsage();
-      set({ usage, isLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      set({ collectionLoading: false, error: String(e) });
+      return;
     }
+
+    const [usageResult, providersResult] = await Promise.allSettled([
+      getCurrentUsage(),
+      getProviderStatus(),
+    ]);
+
+    const errors: string[] = [];
+    if (usageResult.status === "fulfilled") {
+      set({ usage: usageResult.value });
+    } else {
+      errors.push(String(usageResult.reason));
+    }
+    if (providersResult.status === "fulfilled") {
+      set({ providers: providersResult.value });
+    } else {
+      errors.push(String(providersResult.reason));
+    }
+
+    set({
+      collectionLoading: false,
+      error: errors.length > 0 ? errors.join("; ") : null,
+    });
   },
 
   updateSettings: async (settings: Partial<AppSettings>) => {
-    set({ isLoading: true, error: null });
+    set({ settingsLoading: true, error: null });
     try {
       await ipcUpdateSettings(settings);
-      set({ isLoading: false });
+      set({ settingsLoading: false });
     } catch (e) {
-      set({ error: String(e), isLoading: false });
+      set({ error: String(e), settingsLoading: false });
     }
   },
 

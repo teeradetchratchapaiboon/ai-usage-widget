@@ -107,7 +107,9 @@ fn extract_host(url: &str) -> Option<String> {
     // Must have a scheme
     let after_scheme = if let Some(rest) = url.strip_prefix("https://") {
         rest
-    } else { url.strip_prefix("http://")? };
+    } else {
+        url.strip_prefix("http://")?
+    };
 
     if after_scheme.is_empty() {
         return None;
@@ -243,23 +245,18 @@ mod prop_tests_network_guard {
 
     /// Strategy to generate random path segments (e.g., "/v1/chat/completions")
     fn path_strategy() -> impl Strategy<Value = String> {
-        prop::collection::vec("[a-z0-9_\\-]{1,12}", 0..4)
-            .prop_map(|segments| {
-                if segments.is_empty() {
-                    String::new()
-                } else {
-                    format!("/{}", segments.join("/"))
-                }
-            })
+        prop::collection::vec("[a-z0-9_\\-]{1,12}", 0..4).prop_map(|segments| {
+            if segments.is_empty() {
+                String::new()
+            } else {
+                format!("/{}", segments.join("/"))
+            }
+        })
     }
 
     /// Strategy to generate random query strings (e.g., "?key=value&foo=bar")
     fn query_strategy() -> impl Strategy<Value = String> {
-        prop::collection::vec(
-            ("[a-z]{1,6}", "[a-z0-9]{1,8}"),
-            0..3,
-        )
-        .prop_map(|pairs| {
+        prop::collection::vec(("[a-z]{1,6}", "[a-z0-9]{1,8}"), 0..3).prop_map(|pairs| {
             if pairs.is_empty() {
                 String::new()
             } else {
@@ -271,18 +268,22 @@ mod prop_tests_network_guard {
 
     /// Strategy to generate random subdomain prefixes (e.g., "chat.", "beta.api.")
     fn subdomain_strategy() -> impl Strategy<Value = String> {
-        prop::collection::vec("[a-z]{2,8}", 1..3)
-            .prop_map(|parts| format!("{}.", parts.join(".")))
+        prop::collection::vec("[a-z]{2,8}", 1..3).prop_map(|parts| format!("{}.", parts.join(".")))
     }
 
     /// Strategy to generate random non-allowlisted domain names
     fn random_domain_strategy() -> impl Strategy<Value = String> {
-        ("[a-z]{3,10}", prop::sample::select(vec!["com", "io", "net", "org", "dev"]))
+        (
+            "[a-z]{3,10}",
+            prop::sample::select(vec!["com", "io", "net", "org", "dev"]),
+        )
             .prop_map(|(name, tld)| format!("{}.{}", name, tld))
             .prop_filter("must not be an allowlisted or blocked domain", |domain| {
                 let blocked = ["openai.com", "anthropic.com", "chatgpt.com", "claude.ai"];
                 let allowed = ["api.github.com", "localhost", "127.0.0.1"];
-                !blocked.iter().any(|b| domain == *b || domain.ends_with(&format!(".{}", b)))
+                !blocked
+                    .iter()
+                    .any(|b| domain == *b || domain.ends_with(&format!(".{}", b)))
                     && !allowed.contains(&domain.as_str())
             })
     }

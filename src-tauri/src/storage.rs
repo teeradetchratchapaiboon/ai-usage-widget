@@ -7,9 +7,7 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::error::StorageError;
-use crate::query_types::{
-    Granularity, ProviderUsageSummary, TimeRange, UsageRecord, UsageSummary,
-};
+use crate::query_types::{Granularity, ProviderUsageSummary, TimeRange, UsageRecord, UsageSummary};
 use crate::types::ReconciledEvent;
 
 /// Core storage layer managing SQLite database connections, schema migrations,
@@ -286,8 +284,7 @@ impl StorageLayer {
             providers.push(ProviderUsageSummary {
                 provider_id: pid.clone(),
                 input_tokens_today: today_data.and_then(|r| r.get::<Option<i64>, _>("sum_input")),
-                output_tokens_today: today_data
-                    .and_then(|r| r.get::<Option<i64>, _>("sum_output")),
+                output_tokens_today: today_data.and_then(|r| r.get::<Option<i64>, _>("sum_output")),
                 total_tokens_today: today_data.and_then(|r| r.get::<Option<i64>, _>("sum_total")),
                 input_tokens_this_week: week_data
                     .and_then(|r| r.get::<Option<i64>, _>("sum_input")),
@@ -295,17 +292,13 @@ impl StorageLayer {
                     .and_then(|r| r.get::<Option<i64>, _>("sum_output")),
                 total_tokens_this_week: week_data
                     .and_then(|r| r.get::<Option<i64>, _>("sum_total")),
-                last_activity: today_data
-                    .and_then(|r| r.get::<Option<String>, _>("last_activity")),
+                last_activity: today_data.and_then(|r| r.get::<Option<String>, _>("last_activity")),
             });
         }
 
         // Compute totals across all providers
         let total_tokens_today: Option<i64> = {
-            let sum: i64 = providers
-                .iter()
-                .filter_map(|p| p.total_tokens_today)
-                .sum();
+            let sum: i64 = providers.iter().filter_map(|p| p.total_tokens_today).sum();
             if providers.iter().any(|p| p.total_tokens_today.is_some()) {
                 Some(sum)
             } else {
@@ -318,10 +311,7 @@ impl StorageLayer {
                 .iter()
                 .filter_map(|p| p.total_tokens_this_week)
                 .sum();
-            if providers
-                .iter()
-                .any(|p| p.total_tokens_this_week.is_some())
-            {
+            if providers.iter().any(|p| p.total_tokens_this_week.is_some()) {
                 Some(sum)
             } else {
                 None
@@ -408,9 +398,7 @@ impl StorageLayer {
             .bind(&cutoff_str)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                StorageError::QueryFailed(format!("fingerprint prune failed: {}", e))
-            })?;
+            .map_err(|e| StorageError::QueryFailed(format!("fingerprint prune failed: {}", e)))?;
 
         Ok(result.rows_affected() as u32)
     }
@@ -589,11 +577,7 @@ impl StorageLayer {
         let mut buffer = [0u8; 8192];
         loop {
             let bytes_read = file.read(&mut buffer).map_err(|e| {
-                StorageError::BackupFailed(format!(
-                    "failed to read file {}: {}",
-                    path.display(),
-                    e
-                ))
+                StorageError::BackupFailed(format!("failed to read file {}: {}", path.display(), e))
             })?;
             if bytes_read == 0 {
                 break;
@@ -722,9 +706,7 @@ impl StorageLayer {
         sqlx::raw_sql("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                StorageError::RestoreFailed(format!("failed to checkpoint WAL: {}", e))
-            })?;
+            .map_err(|e| StorageError::RestoreFailed(format!("failed to checkpoint WAL: {}", e)))?;
 
         // Close current pool
         self.pool.close().await;
@@ -868,7 +850,6 @@ CREATE TABLE IF NOT EXISTS backup_history (
 );
 "#;
 
-
 #[cfg(test)]
 mod prop_tests_storage_roundtrip {
     use super::*;
@@ -903,15 +884,13 @@ mod prop_tests_storage_roundtrip {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     fn arb_quota_usage() -> impl Strategy<Value = QuotaUsage> {
@@ -1250,7 +1229,6 @@ mod prop_tests_storage_roundtrip {
     }
 }
 
-
 #[cfg(test)]
 mod prop_tests_backup_corruption {
     use super::*;
@@ -1286,15 +1264,13 @@ mod prop_tests_backup_corruption {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     fn arb_quota_usage() -> impl Strategy<Value = QuotaUsage> {
@@ -1605,7 +1581,6 @@ mod prop_tests_backup_corruption {
     }
 }
 
-
 #[cfg(test)]
 mod prop_tests_retention {
     use super::*;
@@ -1640,15 +1615,13 @@ mod prop_tests_retention {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     fn arb_quota_usage() -> impl Strategy<Value = QuotaUsage> {
@@ -2025,7 +1998,6 @@ mod prop_tests_retention {
         }
     }
 }
-
 
 #[cfg(test)]
 mod prop_tests_aggregation {
@@ -2502,7 +2474,6 @@ mod prop_tests_aggregation {
     }
 }
 
-
 #[cfg(test)]
 mod prop_tests_timestamp_consistency {
     use super::*;
@@ -2537,15 +2508,13 @@ mod prop_tests_timestamp_consistency {
             proptest::option::of(0u64..1_000_000),
             proptest::option::of(0u64..10_000_000),
         )
-            .prop_map(
-                |(input, cached, output, reasoning, total)| TokenUsage {
-                    input_tokens: input,
-                    cached_input_tokens: cached,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
-            )
+            .prop_map(|(input, cached, output, reasoning, total)| TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                output_tokens: output,
+                reasoning_tokens: reasoning,
+                total_tokens: total,
+            })
     }
 
     fn arb_quota_usage() -> impl Strategy<Value = QuotaUsage> {
@@ -2579,9 +2548,8 @@ mod prop_tests_timestamp_consistency {
             .timestamp();
 
         // Generate seconds + nanoseconds for sub-second precision
-        (min_ts..max_ts, 0u32..999_999_999u32).prop_map(|(secs, nanos)| {
-            DateTime::from_timestamp(secs, nanos).unwrap()
-        })
+        (min_ts..max_ts, 0u32..999_999_999u32)
+            .prop_map(|(secs, nanos)| DateTime::from_timestamp(secs, nanos).unwrap())
     }
 
     fn arb_fingerprint() -> impl Strategy<Value = EventFingerprint> {

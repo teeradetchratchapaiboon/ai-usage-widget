@@ -1,0 +1,76 @@
+name: CI
+
+# The app is Windows-only: the Rust side links windows-rs and calls Win32
+# directly (window.rs, tray.rs), so it does not compile on Linux runners. The
+# frontend would build anywhere, but running both halves on one runner keeps
+# the matrix honest about what is actually verified.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: Frontend (tests + build)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # `npm test` is already `vitest run`
+      - name: Unit tests
+        run: npm test
+
+      - name: Vite build
+        run: npm run build
+
+  rust:
+    name: Rust (fmt + clippy + tests)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # The frontend build output is not needed for `cargo test`, but
+      # tauri::generate_context! reads tauri.conf.json and expects the
+      # frontendDist directory to exist.
+      # PowerShell rather than bash: this is a Windows runner, so using the
+      # default shell drops a dependency on Git Bash being on PATH.
+      - name: Prepare dist placeholder
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist | Out-Null
+          if (-not (Test-Path ../dist/index.html)) {
+            New-Item -ItemType File -Path ../dist/index.html | Out-Null
+          }
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --all-targets

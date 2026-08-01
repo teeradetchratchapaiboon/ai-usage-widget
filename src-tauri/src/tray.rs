@@ -87,13 +87,7 @@ pub fn register_autostart(exe_path: &Path) -> Result<(), AutostartError> {
             )));
         }
 
-        let set_result = RegSetValueExW(
-            hkey,
-            &value_name,
-            Some(0),
-            REG_SZ,
-            Some(&bytes),
-        );
+        let set_result = RegSetValueExW(hkey, &value_name, Some(0), REG_SZ, Some(&bytes));
 
         let _ = RegCloseKey(hkey);
 
@@ -121,13 +115,8 @@ pub fn unregister_autostart() -> Result<(), AutostartError> {
 
     unsafe {
         let mut hkey = HKEY::default();
-        let open_result = RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            &key_path,
-            Some(0),
-            KEY_WRITE,
-            &mut hkey,
-        );
+        let open_result =
+            RegOpenKeyExW(HKEY_CURRENT_USER, &key_path, Some(0), KEY_WRITE, &mut hkey);
 
         if open_result.is_err() {
             // Key doesn't exist or can't be opened — already unregistered
@@ -159,26 +148,13 @@ pub fn is_autostart_enabled() -> Result<bool, AutostartError> {
 
     unsafe {
         let mut hkey = HKEY::default();
-        let open_result = RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            &key_path,
-            Some(0),
-            KEY_READ,
-            &mut hkey,
-        );
+        let open_result = RegOpenKeyExW(HKEY_CURRENT_USER, &key_path, Some(0), KEY_READ, &mut hkey);
 
         if open_result.is_err() {
             return Ok(false);
         }
 
-        let query_result = RegQueryValueExW(
-            hkey,
-            &value_name,
-            None,
-            None,
-            None,
-            None,
-        );
+        let query_result = RegQueryValueExW(hkey, &value_name, None, None, None, None);
 
         let _ = RegCloseKey(hkey);
 
@@ -233,14 +209,28 @@ fn build_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
 
     let l = labels_for(locale);
 
-    let show_widget =
-        MenuItem::with_id(manager, menu_ids::SHOW_WIDGET, l.show_widget, true, None::<&str>)?;
-    let show_dashboard =
-        MenuItem::with_id(manager, menu_ids::SHOW_DASHBOARD, l.dashboard, true, None::<&str>)?;
-    let collect_now =
-        MenuItem::with_id(manager, menu_ids::COLLECT_NOW, l.collect_now, true, None::<&str>)?;
-    let language =
-        MenuItem::with_id(manager, menu_ids::LANGUAGE, l.language, true, None::<&str>)?;
+    let show_widget = MenuItem::with_id(
+        manager,
+        menu_ids::SHOW_WIDGET,
+        l.show_widget,
+        true,
+        None::<&str>,
+    )?;
+    let show_dashboard = MenuItem::with_id(
+        manager,
+        menu_ids::SHOW_DASHBOARD,
+        l.dashboard,
+        true,
+        None::<&str>,
+    )?;
+    let collect_now = MenuItem::with_id(
+        manager,
+        menu_ids::COLLECT_NOW,
+        l.collect_now,
+        true,
+        None::<&str>,
+    )?;
+    let language = MenuItem::with_id(manager, menu_ids::LANGUAGE, l.language, true, None::<&str>)?;
     let settings = MenuItem::with_id(manager, menu_ids::SETTINGS, l.settings, true, None::<&str>)?;
     let quit = MenuItem::with_id(manager, menu_ids::QUIT, l.quit, true, None::<&str>)?;
 
@@ -520,7 +510,10 @@ mod tests {
 
         // Verify it's disabled
         let disabled = !is_autostart_enabled().unwrap();
-        assert!(disabled, "autostart should be disabled after unregistration");
+        assert!(
+            disabled,
+            "autostart should be disabled after unregistration"
+        );
     }
 
     #[test]
