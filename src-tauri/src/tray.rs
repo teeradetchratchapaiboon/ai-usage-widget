@@ -326,10 +326,21 @@ pub fn build_system_tray(
 
 /// Show the dashboard window on the requested tab, creating it on first use.
 ///
-/// The tab is delivered as an event; the window is created hidden-then-shown so
-/// the tab is already set when the view first paints.
+/// The work runs on a worker thread. `WebviewWindowBuilder::build` blocks until
+/// the event loop has finished creating the window, so calling it *from* the
+/// main thread — which is where both tray clicks and IPC commands land —
+/// deadlocks: the window appears but never initialises, and the caller never
+/// returns. Off the main thread the event loop stays free to service it.
 #[cfg(not(test))]
 pub fn open_dashboard(app: &tauri::AppHandle, tab: &str) {
+    let app = app.clone();
+    let tab = tab.to_string();
+    tauri::async_runtime::spawn_blocking(move || open_dashboard_blocking(&app, &tab));
+}
+
+/// The body of [`open_dashboard`], always off the main thread.
+#[cfg(not(test))]
+fn open_dashboard_blocking(app: &tauri::AppHandle, tab: &str) {
     use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
     if let Some(window) = app.get_webview_window("dashboard") {

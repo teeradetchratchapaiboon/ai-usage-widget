@@ -144,3 +144,8 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
 export async function openDashboard(tab: "usage" | "settings" = "usage"): Promise<void> {
   return invoke("open_dashboard", { tab });
 }
+
+/** Bring the compact widget back to the front. */
+export async function showWidget(): Promise<void> {
+  return invoke("show_widget");
+}

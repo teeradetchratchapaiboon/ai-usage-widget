@@ -2,8 +2,8 @@
  * DashboardShell - Chrome for the dashboard window.
  *
  * Hosts the update banner and the two tabs (usage charts / settings). The
- * initial tab comes from the `?tab=` query the tray puts on the URL when it
- * creates the window; later tray clicks arrive as a `dashboard-tab` event.
+ * initial tab is injected as `window.__DASHBOARD_TAB__` before the window
+ * boots; later tray clicks arrive as a `dashboard-tab` event.
  */
 
 import { useEffect, useState } from "react";
@@ -12,6 +12,7 @@ import { Dashboard } from "./Dashboard";
 import { Settings } from "./Settings";
 import { UpdateBanner } from "./UpdateBanner";
 import { onAppEvent } from "../lib/tauri";
+import { showWidget } from "../lib/ipc";
 
 type Tab = "usage" | "settings";
 
@@ -46,7 +47,7 @@ export function DashboardShell() {
     <div className="min-h-screen bg-neutral-900 text-white/90 flex flex-col">
       <UpdateBanner />
 
-      <nav className="flex gap-1 px-4 pt-3 border-b border-white/10">
+      <nav className="flex items-end gap-1 px-4 pt-3 border-b border-white/10">
         <TabButton
           active={tab === "usage"}
           onClick={() => setTab("usage")}
@@ -57,6 +58,14 @@ export function DashboardShell() {
           onClick={() => setTab("settings")}
           label={t("settings.title")}
         />
+        {/* The widget skips the taskbar, so this is the way back to it */}
+        <button
+          type="button"
+          onClick={() => void showWidget()}
+          className="ml-auto mb-1 px-3 py-1.5 text-xs rounded-md bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-colors"
+        >
+          ← {t("tray.showWidget")}
+        </button>
       </nav>
 
       <main className="flex-1 overflow-auto p-4">

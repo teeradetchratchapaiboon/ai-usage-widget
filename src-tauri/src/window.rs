@@ -220,36 +220,9 @@ pub mod tauri_ops {
         Ok(())
     }
 
-    /// Toggle the dashboard window open/closed.
-    pub fn toggle_dashboard(app: &AppHandle, wm: &WindowManager) -> Result<(), String> {
-        let label = wm.dashboard_label();
-
-        if wm.is_dashboard_open() {
-            // Close the dashboard
-            if let Some(window) = app.get_webview_window(label) {
-                window.close().map_err(|e| e.to_string())?;
-            }
-            wm.mark_dashboard_closed();
-        } else {
-            // Open the dashboard
-            if let Some(window) = app.get_webview_window(label) {
-                window.show().map_err(|e| e.to_string())?;
-                window.set_focus().map_err(|e| e.to_string())?;
-            } else {
-                let _window =
-                    WebviewWindowBuilder::new(app, label, WebviewUrl::App("/dashboard".into()))
-                        .title("AI Usage Widget - Dashboard")
-                        .inner_size(900.0, 600.0)
-                        .decorations(true)
-                        .resizable(true)
-                        .build()
-                        .map_err(|e| e.to_string())?;
-            }
-            wm.mark_dashboard_open();
-        }
-
-        Ok(())
-    }
+    // The dashboard window is created by `tray::open_dashboard`, which knows
+    // that the builder has to run off the main thread and that the bundled SPA
+    // is served from index.html rather than a `/dashboard` route.
 
     /// Set always-on-top state on the compact widget window via Tauri API.
     pub fn set_always_on_top(app: &AppHandle, wm: &WindowManager, enabled: bool) -> Result<(), String> {

@@ -183,6 +183,23 @@ pub fn open_dashboard(app: tauri::AppHandle, tab: Option<String>) -> Result<(), 
     Ok(())
 }
 
+/// Bring the compact widget back to the front and focus it.
+///
+/// A maximised dashboard covers the widget, and the widget skips the taskbar,
+/// so without this the tray icon is the only way back.
+#[cfg(not(test))]
+#[tauri::command]
+pub fn show_widget(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "widget window is gone".to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Record an uncaught frontend error in the application log.
 ///
 /// Release builds have no devtools, so without this a webview exception is
