@@ -348,6 +348,7 @@ fn open_dashboard_blocking(app: &tauri::AppHandle, tab: &str) {
         let _ = window.set_focus();
         // The view is already mounted, so the tab arrives as an event.
         let _ = window.emit("dashboard-tab", tab.to_string());
+        hide_widget(app);
         return;
     }
 
@@ -373,10 +374,42 @@ fn open_dashboard_blocking(app: &tauri::AppHandle, tab: &str) {
                 "Dashboard window created (url={:?})",
                 window.url().map(|u| u.to_string())
             );
+
+            // Widget mode and dashboard mode are exclusive: closing the
+            // dashboard by any route puts the widget back on screen.
+            let app_for_close = app.clone();
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                    show_widget(&app_for_close);
+                }
+            });
+
             let _ = window.show();
             let _ = window.set_focus();
+            hide_widget(app);
         }
         Err(e) => log::error!("Failed to create dashboard window: {}", e),
+    }
+}
+
+/// Hide the compact widget while the dashboard has the screen.
+#[cfg(not(test))]
+fn hide_widget(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    if let Some(widget) = app.get_webview_window("main") {
+        let _ = widget.hide();
+    }
+}
+
+/// Put the compact widget back on screen.
+#[cfg(not(test))]
+fn show_widget(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
+    if let Some(widget) = app.get_webview_window("main") {
+        let _ = widget.show();
+        let _ = widget.set_focus();
     }
 }
 
@@ -389,10 +422,11 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, menu_id: &str) {
 
     match menu_id {
         menu_ids::SHOW_WIDGET => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+            // Back to widget mode, so close the dashboard if it has the screen
+            if let Some(dashboard) = app.get_webview_window("dashboard") {
+                let _ = dashboard.close();
             }
+            show_widget(app);
         }
         menu_ids::SHOW_DASHBOARD => {
             open_dashboard(app, "usage");

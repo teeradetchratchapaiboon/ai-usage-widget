@@ -183,20 +183,69 @@ pub fn open_dashboard(app: tauri::AppHandle, tab: Option<String>) -> Result<(), 
     Ok(())
 }
 
-/// Bring the compact widget back to the front and focus it.
+/// Leave dashboard mode: close the dashboard and bring the widget back.
 ///
-/// A maximised dashboard covers the widget, and the widget skips the taskbar,
-/// so without this the tray icon is the only way back.
+/// The two views are exclusive — the widget skips the taskbar, so leaving it
+/// behind a full dashboard would make it unreachable except from the tray.
 #[cfg(not(test))]
 #[tauri::command]
 pub fn show_widget(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
+
+    if let Some(dashboard) = app.get_webview_window("dashboard") {
+        dashboard.close().map_err(|e| e.to_string())?;
+    }
 
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "widget window is gone".to_string())?;
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Height of the collapsed widget: just the header strip, in logical pixels.
+#[cfg(not(test))]
+const COLLAPSED_WIDGET_HEIGHT: f64 = 40.0;
+
+/// Collapse the widget to its header strip, or restore its previous height.
+///
+/// Resizing lives on this side because the collapsed height is below the
+/// window's minimum, which has to be lifted for the duration.
+#[cfg(not(test))]
+#[tauri::command]
+pub fn set_widget_collapsed(
+    app: tauri::AppHandle,
+    collapsed: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri::{LogicalSize, Manager};
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "widget window is gone".to_string())?;
+
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let current = window
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+
+    let (min_height, height) = if collapsed {
+        state.window_manager.remember_expanded_height(current.height);
+        (COLLAPSED_WIDGET_HEIGHT, COLLAPSED_WIDGET_HEIGHT)
+    } else {
+        (150.0, state.window_manager.take_expanded_height())
+    };
+
+    // Order matters: the minimum has to allow the new height before we ask for it
+    window
+        .set_min_size(Some(LogicalSize::new(280.0, min_height)))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_size(LogicalSize::new(current.width, height))
+        .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 

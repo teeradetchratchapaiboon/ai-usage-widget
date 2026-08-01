@@ -25,7 +25,9 @@
     "week": "Week",
     "month": "Month",
     "custom": "Custom",
-    "title": "Usage"
+    "title": "Usage",
+    "provider": "Program",
+    "allProviders": "All"
   },
   "granularity": {
     "hourly": "Hourly",

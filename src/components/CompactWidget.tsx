@@ -5,7 +5,7 @@
  * Uses Windows 11 glass (Acrylic) visual effect via backdrop-filter.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import {
@@ -13,7 +13,7 @@ import {
   formatRelative,
   formatResetTime,
 } from "../lib/format";
-import { openDashboard } from "../lib/ipc";
+import { openDashboard, setWidgetCollapsed } from "../lib/ipc";
 import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
@@ -42,6 +42,16 @@ function remainingPct(usedPct: number): number {
 export function CompactWidget() {
   const { t } = useTranslation();
   const { usage, providers, isLoading, fetchUsage, fetchProviderStatus } = useAppStore();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    void setWidgetCollapsed(next).catch((err) => {
+      console.warn("Could not resize the widget:", err);
+      setCollapsed(!next);
+    });
+  };
 
   // Fetch on mount and every 10 seconds
   useEffect(() => {
@@ -65,7 +75,11 @@ export function CompactWidget() {
   }
 
   return (
-    <div className="widget-glass w-screen h-screen rounded-lg p-3 flex flex-col overflow-hidden">
+    <div
+      className={`widget-glass w-screen h-screen rounded-lg flex flex-col overflow-hidden ${
+        collapsed ? "px-3 py-1.5" : "p-3"
+      }`}
+    >
       {/* Content stays readable when the window is enlarged or maximized */}
       <div className="flex flex-col gap-2 flex-1 min-h-0 w-full max-w-md mx-auto">
       {/* Header doubles as the drag handle: the window has no title bar */}
@@ -81,9 +95,47 @@ export function CompactWidget() {
           {t("widget.title")}
         </h1>
         <div className="flex items-center gap-2 shrink-0">
+          {/* Collapsed, the header is all there is — carry the numbers up here */}
+          {collapsed &&
+            providers.map((provider) => {
+              const quota = highestQuota(provider);
+              if (quota === null) return null;
+              const left = remainingPct(quota);
+              return (
+                <span
+                  key={provider.provider_id}
+                  data-tauri-drag-region
+                  title={provider.display_name}
+                  className={`text-[10px] font-mono ${
+                    left <= 10 ? "text-red-300" : left <= 25 ? "text-amber-300" : "text-emerald-300"
+                  }`}
+                >
+                  {provider.provider_id === "codex" ? "CX" : "CL"} {left.toFixed(0)}%
+                </span>
+              );
+            })}
           <span data-tauri-drag-region className="text-[10px] text-white/50">
             {formatTokenCountCompact(usage?.total_tokens_today ?? null)}
           </span>
+          <button
+            type="button"
+            title={collapsed ? t("actions.expand") : t("actions.collapse")}
+            aria-label={collapsed ? t("actions.expand") : t("actions.collapse")}
+            aria-expanded={!collapsed}
+            onClick={toggleCollapsed}
+            className="w-5 h-5 flex items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <svg viewBox="0 0 16 16" className="w-3 h-3" aria-hidden="true">
+              <path
+                d={collapsed ? "M4 6.5L8 10.5L12 6.5" : "M4 9.5L8 5.5L12 9.5"}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <button
             type="button"
             title={t("window.maximize")}
@@ -126,7 +178,8 @@ export function CompactWidget() {
         </div>
       </div>
 
-      {/* Provider list */}
+      {/* Provider list — collapsed, the header is the whole widget */}
+      {!collapsed && (
       <div className="flex-1 flex flex-col gap-2 overflow-y-auto overflow-x-hidden">
         {providers.map((provider) => {
           const providerUsage = usage?.providers.find(
@@ -153,8 +206,10 @@ export function CompactWidget() {
           </div>
         )}
       </div>
+      )}
 
       {/* Footer */}
+      {!collapsed && (
       <div className="flex items-center justify-between border-t border-white/10 pt-1">
         <span className="text-[10px] text-white/40">
           {usage?.last_updated
@@ -162,6 +217,7 @@ export function CompactWidget() {
             : ""}
         </span>
       </div>
+      )}
       </div>
     </div>
   );

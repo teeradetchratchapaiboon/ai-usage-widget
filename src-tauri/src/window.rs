@@ -35,6 +35,9 @@ pub struct WindowManager {
     click_through: AtomicBool,
     /// Whether the widget is hidden due to a fullscreen app.
     hidden_for_fullscreen: AtomicBool,
+    /// Widget height before it was collapsed, so expanding restores what the
+    /// user had rather than the configured default.
+    expanded_height: Mutex<Option<f64>>,
 }
 
 impl WindowManager {
@@ -49,7 +52,22 @@ impl WindowManager {
             position_file: data_dir.join("window_position.json"),
             click_through: AtomicBool::new(click_through_initial),
             hidden_for_fullscreen: AtomicBool::new(false),
+            expanded_height: Mutex::new(None),
         }
+    }
+
+    /// Remember the widget height to restore when it is expanded again.
+    pub fn remember_expanded_height(&self, height: f64) {
+        *self.expanded_height.lock().unwrap() = Some(height);
+    }
+
+    /// Take the remembered height, falling back to the configured one.
+    pub fn take_expanded_height(&self) -> f64 {
+        self.expanded_height
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| self.config.lock().unwrap().height as f64)
     }
 
     /// Get the compact widget window label.

@@ -378,6 +378,7 @@ pub fn run() {
             commands::check_for_updates,
             commands::open_dashboard,
             commands::show_widget,
+            commands::set_widget_collapsed,
             commands::log_frontend_error,
         ])
         .run(tauri::generate_context!())

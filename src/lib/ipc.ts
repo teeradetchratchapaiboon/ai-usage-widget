@@ -145,7 +145,12 @@ export async function openDashboard(tab: "usage" | "settings" = "usage"): Promis
   return invoke("open_dashboard", { tab });
 }
 
-/** Bring the compact widget back to the front. */
+/** Close the dashboard and return to widget mode. */
 export async function showWidget(): Promise<void> {
   return invoke("show_widget");
+}
+
+/** Collapse the widget to its header strip, or restore its height. */
+export async function setWidgetCollapsed(collapsed: boolean): Promise<void> {
+  return invoke("set_widget_collapsed", { collapsed });
 }

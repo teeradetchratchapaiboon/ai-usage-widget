@@ -25,7 +25,9 @@
     "week": "สัปดาห์",
     "month": "เดือน",
     "custom": "กำหนดเอง",
-    "title": "การใช้งาน"
+    "title": "การใช้งาน",
+    "provider": "โปรแกรม",
+    "allProviders": "ทั้งหมด"
   },
   "granularity": {
     "hourly": "รายชั่วโมง",
@@ -75,8 +77,8 @@
     "days": "วัน"
   },
   "actions": {
-    "expand": "ขยาย",
-    "collapse": "ย่อ",
+    "expand": "กางออก",
+    "collapse": "พับ",
     "refresh": "รีเฟรช",
     "save": "บันทึก",
     "cancel": "ยกเลิก"

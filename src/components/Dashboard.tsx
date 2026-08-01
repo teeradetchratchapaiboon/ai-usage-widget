@@ -54,6 +54,16 @@ interface TokenTypeSummary {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
+/** Picker value that applies no provider filter. */
+const ALL_PROVIDERS = "__all__";
+
+/** Translated provider name, falling back to the raw id. */
+function providerLabel(t: (key: string) => string, providerId: string): string {
+  if (providerId === "codex") return t("provider.codex");
+  if (providerId === "claude") return t("provider.claude");
+  return providerId;
+}
+
 function getTimeRangeStart(range: TimeRange): string {
   const now = new Date();
   switch (range) {
@@ -188,6 +198,7 @@ export function Dashboard() {
 
   const [timeRange, setTimeRange] = useState<TimeRange>("week");
   const [granularity, setGranularity] = useState<Granularity>("daily");
+  const [provider, setProvider] = useState<string>(ALL_PROVIDERS);
 
   // Fetch history when time range or granularity changes
   const loadHistory = useCallback(() => {
@@ -200,21 +211,45 @@ export function Dashboard() {
     loadHistory();
   }, [loadHistory]);
 
+  // Which providers the current range has data for, so the picker only ever
+  // offers something that can actually be charted
+  const availableProviders = useMemo(
+    () => Array.from(new Set(history.map((r) => r.provider_id))).sort(),
+    [history],
+  );
+
+  // A range change can leave the selected provider with nothing to show
+  useEffect(() => {
+    if (
+      provider !== ALL_PROVIDERS &&
+      availableProviders.length > 0 &&
+      !availableProviders.includes(provider)
+    ) {
+      setProvider(ALL_PROVIDERS);
+    }
+  }, [availableProviders, provider]);
+
+  // Everything below the picker sees one provider's records, or all of them
+  const shown = useMemo(
+    () =>
+      provider === ALL_PROVIDERS
+        ? history
+        : history.filter((r) => r.provider_id === provider),
+    [history, provider],
+  );
+
   // Memoized computed data
   const chartData = useMemo(
-    () => aggregateChartData(history, granularity),
-    [history, granularity],
+    () => aggregateChartData(shown, granularity),
+    [shown, granularity],
   );
 
   const providerBreakdowns = useMemo(
-    () => computeProviderBreakdowns(history),
-    [history],
+    () => computeProviderBreakdowns(shown),
+    [shown],
   );
 
-  const tokenSummary = useMemo(
-    () => computeTokenTypeSummary(history),
-    [history],
-  );
+  const tokenSummary = useMemo(() => computeTokenTypeSummary(shown), [shown]);
 
   return (
     <div className="w-full h-full bg-gray-900 text-white p-6 flex flex-col gap-4 overflow-y-auto">
@@ -247,6 +282,28 @@ export function Dashboard() {
             ))}
           </div>
         </div>
+
+        {/* Provider Filter — one program at a time, or everything together */}
+        {availableProviders.length > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-white/60">{t("dashboard.provider")}:</span>
+            <div className="flex gap-1">
+              {[ALL_PROVIDERS, ...availableProviders].map((id) => (
+                <button
+                  key={id}
+                  onClick={() => setProvider(id)}
+                  className={`px-3 py-1 text-xs rounded transition-colors ${
+                    provider === id
+                      ? "bg-blue-600 text-white"
+                      : "bg-white/10 text-white/70 hover:bg-white/20"
+                  }`}
+                >
+                  {id === ALL_PROVIDERS ? t("dashboard.allProviders") : providerLabel(t, id)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Granularity Picker */}
         <div className="flex items-center gap-2">
@@ -383,17 +440,12 @@ interface ProviderBreakdownRowProps {
 function ProviderBreakdownRow({ breakdown }: ProviderBreakdownRowProps) {
   const { t } = useTranslation();
 
-  const providerLabel =
-    breakdown.providerId === "codex"
-      ? t("provider.codex")
-      : breakdown.providerId === "claude"
-        ? t("provider.claude")
-        : breakdown.providerId;
-
   return (
     <div className="flex flex-col gap-0.5 py-1 border-b border-white/5 last:border-b-0">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-white/90 font-medium">{providerLabel}</span>
+        <span className="text-xs text-white/90 font-medium">
+          {providerLabel(t, breakdown.providerId)}
+        </span>
         <span className="text-[10px] text-white/50">{breakdown.model}</span>
       </div>
       <div className="flex items-center gap-3 text-[10px] text-white/60">
