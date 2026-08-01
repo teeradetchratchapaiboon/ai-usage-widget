@@ -162,6 +162,8 @@ function setupMocks() {
         return Promise.resolve(fixtureProviders);
       case "get_usage_history":
         return Promise.resolve(fixtureHistory);
+      case "get_widget_collapsed":
+        return Promise.resolve(false);
       default:
         return Promise.resolve(null);
     }
@@ -267,6 +269,45 @@ describe("CompactWidget", () => {
     // The track carries the colour, since a 0%-wide fill draws nothing
     const track = exhausted.previousElementSibling;
     expect(track?.className).toContain("bg-red-500/40");
+  });
+
+  it("reopens collapsed when that is how it was left", async () => {
+    // The flag lives in React, which forgets on every launch, so the backend
+    // is asked for it on mount — and the window has to be told too, or an
+    // expanded UI ends up inside a 40px strip.
+    mockInvoke.mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "get_current_usage":
+          return Promise.resolve(fixtureUsageSummary);
+        case "get_provider_status":
+          return Promise.resolve(fixtureProviders);
+        case "get_widget_collapsed":
+          return Promise.resolve(true);
+        default:
+          return Promise.resolve(null);
+      }
+    });
+
+    const { CompactWidget } = await import("../components/CompactWidget");
+
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18n}>
+          <CompactWidget />
+        </I18nextProvider>,
+      );
+    });
+
+    await waitFor(() => {
+      const toggle = document.querySelector("button[aria-expanded]");
+      expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    // The provider rows are gone, and the header carries the numbers instead
+    expect(screen.queryByText("Codex Desktop")).toBeNull();
+    expect(resetLines()).toHaveLength(0);
+
+    expect(mockInvoke).toHaveBeenCalledWith("set_widget_collapsed", { collapsed: true });
   });
 
   it("counts down to a reset instead of printing a wall-clock date", async () => {

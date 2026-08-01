@@ -125,9 +125,38 @@ impl WindowManager {
         }
     }
 
+    /// Height of the widget collapsed to its header strip, logical pixels.
+    pub const COLLAPSED_HEIGHT: u32 = 40;
+
     /// Smallest height that can be a deliberate window size rather than the
     /// widget sitting collapsed to its header strip.
     pub const MIN_PERSISTABLE_HEIGHT: u32 = 150;
+
+    /// Whether the widget was left collapsed.
+    pub fn is_collapsed(&self) -> bool {
+        self.config.lock().unwrap().collapsed
+    }
+
+    /// Record whether the widget is collapsed, so it reopens the same way.
+    pub fn set_collapsed(&self, collapsed: bool) {
+        self.config.lock().unwrap().collapsed = collapsed;
+    }
+
+    /// The size the widget should open at.
+    ///
+    /// Separate from [`compact_widget_size`](Self::compact_widget_size), which
+    /// is the expanded size the window remembers: building the window at the
+    /// full height and letting the frontend collapse it afterwards shows the
+    /// widget springing shut every launch.
+    pub fn startup_widget_size(&self) -> (u32, u32) {
+        let cfg = self.config.lock().unwrap();
+        let height = if cfg.collapsed {
+            Self::COLLAPSED_HEIGHT
+        } else {
+            cfg.height
+        };
+        (cfg.width, height)
+    }
 
     /// Persist the window size to config.
     ///
@@ -220,7 +249,7 @@ pub mod tauri_ops {
             return Ok(());
         }
 
-        let (width, height) = wm.compact_widget_size();
+        let (width, height) = wm.startup_widget_size();
         let always_on_top = wm.is_always_on_top();
 
         let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
@@ -640,6 +669,28 @@ mod collapse_persistence_tests {
 
         wm.persist_size(420, 520);
         assert_eq!(wm.compact_widget_size(), (420, 520));
+    }
+
+    #[test]
+    fn test_a_collapsed_widget_reopens_collapsed() {
+        // Building at the full height and letting the frontend collapse it
+        // shows the widget springing shut on every launch.
+        let wm = manager();
+        let (width, expanded) = wm.compact_widget_size();
+        assert_eq!(wm.startup_widget_size(), (width, expanded));
+
+        wm.set_collapsed(true);
+
+        assert!(wm.is_collapsed());
+        assert_eq!(
+            wm.startup_widget_size(),
+            (width, WindowManager::COLLAPSED_HEIGHT)
+        );
+        // The expanded height is remembered, not overwritten
+        assert_eq!(wm.compact_widget_size(), (width, expanded));
+
+        wm.set_collapsed(false);
+        assert_eq!(wm.startup_widget_size(), (width, expanded));
     }
 
     #[test]

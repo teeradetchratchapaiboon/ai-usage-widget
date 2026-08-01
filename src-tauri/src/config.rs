@@ -172,6 +172,12 @@ pub struct WindowConfig {
 
     /// Persisted Y position (logical pixels).
     pub position_y: Option<i32>,
+
+    /// Whether the widget was left collapsed to its header strip.
+    ///
+    /// Defaulted so a config written before this field still loads.
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 impl Default for WindowConfig {
@@ -183,6 +189,7 @@ impl Default for WindowConfig {
             click_through: false,
             position_x: None,
             position_y: None,
+            collapsed: false,
         }
     }
 }

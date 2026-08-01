@@ -158,3 +158,8 @@ export async function showWidget(): Promise<void> {
 export async function setWidgetCollapsed(collapsed: boolean): Promise<void> {
   return invoke("set_widget_collapsed", { collapsed });
 }
+
+/** Whether the widget was left collapsed when it was last closed. */
+export async function getWidgetCollapsed(): Promise<boolean> {
+  return invoke("get_widget_collapsed");
+}

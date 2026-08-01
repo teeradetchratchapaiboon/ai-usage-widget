@@ -14,7 +14,7 @@ import {
   formatResetTime,
   formatCountdown,
 } from "../lib/format";
-import { openDashboard, setWidgetCollapsed } from "../lib/ipc";
+import { openDashboard, setWidgetCollapsed, getWidgetCollapsed } from "../lib/ipc";
 import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
@@ -108,14 +108,20 @@ export function CompactWidget() {
     });
   };
 
-  // The collapsed flag lives in React but the height lives in the window, and
-  // a webview reload resets one without the other — leaving an expanded UI
-  // inside a 40px strip, where the only control that could fix it is scrolled
-  // out of sight. Mounting expanded means the window must be expanded too.
+  // React owns the collapsed flag at runtime, the window owns the height, and
+  // only the backend remembers either across launches. On mount the persisted
+  // value is the truth and both sides are set from it — which also repairs the
+  // case where a webview reload resets React but leaves the window at 40px,
+  // stranding an expanded UI in a strip too short to show the way out.
   useEffect(() => {
-    void setWidgetCollapsed(false).catch((err) => {
-      console.warn("Could not restore the widget height:", err);
-    });
+    getWidgetCollapsed()
+      .then((persisted) => {
+        setCollapsed(persisted);
+        return setWidgetCollapsed(persisted);
+      })
+      .catch((err) => {
+        console.warn("Could not restore the collapsed state:", err);
+      });
   }, []);
 
   // Fetch on mount and every 10 seconds

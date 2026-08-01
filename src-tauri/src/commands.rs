@@ -219,9 +219,15 @@ pub fn show_widget(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Height of the collapsed widget: just the header strip, in logical pixels.
+/// Whether the widget was left collapsed when it was last closed.
+///
+/// The frontend owns the collapsed flag at runtime but cannot remember it
+/// across launches, so it asks for the persisted value on mount.
 #[cfg(not(test))]
-const COLLAPSED_WIDGET_HEIGHT: f64 = 40.0;
+#[tauri::command]
+pub async fn get_widget_collapsed(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.window_manager.is_collapsed())
+}
 
 /// Collapse the widget to its header strip, or restore its previous height.
 ///
@@ -229,11 +235,12 @@ const COLLAPSED_WIDGET_HEIGHT: f64 = 40.0;
 /// window's minimum, which has to be lifted for the duration.
 #[cfg(not(test))]
 #[tauri::command]
-pub fn set_widget_collapsed(
+pub async fn set_widget_collapsed(
     app: tauri::AppHandle,
     collapsed: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    use crate::window::WindowManager;
     use tauri::{LogicalSize, Manager};
 
     let window = app
@@ -248,10 +255,13 @@ pub fn set_widget_collapsed(
 
     let (min_height, height) = if collapsed {
         state.window_manager.remember_expanded_height(current.height);
-        (COLLAPSED_WIDGET_HEIGHT, COLLAPSED_WIDGET_HEIGHT)
+        (
+            WindowManager::COLLAPSED_HEIGHT as f64,
+            WindowManager::COLLAPSED_HEIGHT as f64,
+        )
     } else {
         (
-            crate::window::WindowManager::MIN_PERSISTABLE_HEIGHT as f64,
+            WindowManager::MIN_PERSISTABLE_HEIGHT as f64,
             state.window_manager.take_expanded_height(),
         )
     };
@@ -263,6 +273,18 @@ pub fn set_widget_collapsed(
     window
         .set_size(LogicalSize::new(current.width, height))
         .map_err(|e| e.to_string())?;
+
+    // Persist, so the widget reopens the way it was left. Written now rather
+    // than at shutdown: the app exits via the tray and is routinely killed,
+    // and a preference that survives only a clean exit is not a preference.
+    state.window_manager.set_collapsed(collapsed);
+    {
+        let mut config = state.config.lock().await;
+        config.window.collapsed = collapsed;
+        config
+            .save_to_file(&state.config_path)
+            .map_err(|e| format!("Failed to persist collapsed state: {}", e))?;
+    }
 
     Ok(())
 }

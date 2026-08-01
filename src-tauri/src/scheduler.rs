@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::dedup::DeduplicationEngine;
-use crate::notify::{NotificationEngine, NotificationEntry};
+use crate::notify::{NotificationEngine, NotificationEntry, QuotaReading, QuotaWindow};
 use crate::reconcile::ReconciliationEngine;
 use crate::registry::{ProviderCollectionOutcome, ProviderRegistry};
 use crate::storage::StorageLayer;
@@ -163,23 +163,45 @@ impl CollectionScheduler {
                     let Some(quota) = summary.quota.as_ref() else {
                         continue;
                     };
-                    // Use the highest reported quota dimension as the trigger.
-                    let Some(pct) = [quota.fast_hours_pct, quota.standard_pct, quota.excess_pct]
-                        .into_iter()
-                        .flatten()
-                        .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))))
-                    else {
-                        continue;
-                    };
 
-                    let entries = self.notifications.check_threshold(
-                        &summary.provider_id,
-                        &summary.display_name,
-                        pct,
-                    );
-                    for entry in entries {
-                        info!("Quota notification: {}", entry.message);
-                        notify(&entry);
+                    // Each window is checked on its own rather than collapsed
+                    // into their maximum. The maximum names no window, so the
+                    // toast could not say whether the wait was hours or days,
+                    // and a spent five-hour window masked the weekly one
+                    // behind it entirely.
+                    let windows = [
+                        (
+                            QuotaWindow::FastHours,
+                            quota.fast_hours_pct,
+                            summary.quota_resets.fast_hours,
+                        ),
+                        (
+                            QuotaWindow::Weekly,
+                            quota.standard_pct,
+                            summary.quota_resets.weekly,
+                        ),
+                        (QuotaWindow::Excess, quota.excess_pct, None),
+                    ];
+
+                    for (window, used_pct, resets_at) in windows {
+                        let Some(used_pct) = used_pct else {
+                            continue;
+                        };
+
+                        let entries = self.notifications.check_threshold(
+                            &summary.provider_id,
+                            &summary.display_name,
+                            QuotaReading {
+                                window,
+                                used_pct,
+                                resets_at,
+                                estimated: summary.quota_resets.estimated,
+                            },
+                        );
+                        for entry in entries {
+                            info!("Quota notification: {}", entry.message);
+                            notify(&entry);
+                        }
                     }
                 }
             }
