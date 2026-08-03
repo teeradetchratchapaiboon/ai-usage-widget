@@ -16,7 +16,7 @@ import {
 } from "../lib/format";
 import { openDashboard, setWidgetCollapsed, getWidgetCollapsed } from "../lib/ipc";
 import { bindingWindow, quotaWindows, remainingPct, type QuotaWindow } from "../lib/quota";
-import { presentFreshness, formatAge } from "../lib/freshness";
+import { presentFreshness, formatUpdatedAgo } from "../lib/freshness";
 import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
@@ -109,7 +109,6 @@ export function CompactWidget() {
 
               const left = remainingPct(binding.usedPct);
               const look = presentFreshness(binding.freshness, binding.ageSecs);
-              const age = formatAge(binding.ageSecs);
 
               // Which window is binding is half the answer: 0% on the
               // five-hour limit is a coffee break, 0% on the weekly one is
@@ -118,7 +117,10 @@ export function CompactWidget() {
               const tooltip = [
                 provider.display_name,
                 t(binding.labelKey),
-                look.caption ?? (age && t("freshness.updatedAgo", { age })),
+                // Via the shared helper rather than composed here: this line
+                // used to build the phrase itself and carried the same
+                // "Updated just now ago" bug independently.
+                look.caption ?? formatUpdatedAgo(binding.ageSecs),
               ]
                 .filter(Boolean)
                 .join(" · ");

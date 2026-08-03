@@ -75,26 +75,78 @@ interface CustomRange {
   end: string;
 }
 
+/** Wall-clock reading of an instant in a given zone, as plain numbers. */
+interface ZonedParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+/**
+ * Read an instant as wall-clock numbers in `timeZone`.
+ *
+ * The calendar, numbering system and hour cycle are all pinned rather than
+ * left to the locale. `datetime-local` accepts exactly "YYYY-MM-DDTHH:mm" and
+ * silently blanks the field for anything else, so every way ICU is allowed to
+ * vary — "24" for midnight under an h24 cycle, unpadded components, non-Latin
+ * digits, a non-Gregorian calendar — is a way for the input to come up empty
+ * on someone else's machine. Numbers are extracted here and the string is
+ * assembled by [`toLocalInputValue`], so formatting can no longer decide
+ * whether the field works.
+ */
+function zonedParts(date: Date, timeZone: string): ZonedParts | null {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    calendar: "gregory",
+    numberingSystem: "latn",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+
+  const read = (type: string): number => {
+    const raw = parts.find((p) => p.type === type)?.value;
+    return raw === undefined ? Number.NaN : Number(raw);
+  };
+
+  const out: ZonedParts = {
+    year: read("year"),
+    month: read("month"),
+    day: read("day"),
+    // h23 should never yield 24, but a stray one must wrap rather than
+    // produce a value the input rejects outright
+    hour: read("hour") % 24,
+    minute: read("minute"),
+    second: read("second"),
+  };
+
+  return Object.values(out).every(Number.isFinite) ? out : null;
+}
+
+const pad = (value: number, width = 2) => String(value).padStart(width, "0");
+
 /**
  * `datetime-local` wants "YYYY-MM-DDTHH:mm" in the *viewer's* zone.
  *
  * The dashboard renders its history in Asia/Bangkok, so the inputs are seeded
  * in that zone too — a range typed in one zone and charted in another silently
  * shifts every bucket.
+ *
+ * Returns "" only when the instant itself is unusable, which the caller can
+ * distinguish from a value the browser rejected.
  */
-function toLocalInputValue(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: DISPLAY_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
+export function toLocalInputValue(date: Date): string {
+  const p = zonedParts(date, DISPLAY_TIME_ZONE);
+  if (p === null) return "";
 
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
-  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+  return `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
 }
 
 /** Seeded to the last seven days so the fields are never blank. */
@@ -109,30 +161,21 @@ const defaultCustomRange: CustomRange = {
  * `new Date("2026-08-01T10:00")` uses the machine's zone, which is only
  * correct by luck. The offset is measured against the target zone instead.
  */
-function bangkokInputToIso(value: string): string | null {
+export function bangkokInputToIso(value: string): string | null {
   if (!value) return null;
 
   const naive = new Date(`${value}:00Z`);
   if (Number.isNaN(naive.getTime())) return null;
 
-  // What the target zone calls that same wall-clock reading
-  const asZoned = new Date(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: DISPLAY_TIME_ZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })
-      .format(naive)
-      .replace(/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/, "$3-$1-$2T$4:$5:$6Z"),
-  );
-  if (Number.isNaN(asZoned.getTime())) return null;
+  // What the target zone calls that same instant, read back as numbers. The
+  // previous version reformatted to a locale string and unpicked it with a
+  // regex, which assumed US date order and Latin digits.
+  const p = zonedParts(naive, DISPLAY_TIME_ZONE);
+  if (p === null) return null;
 
-  const offsetMs = asZoned.getTime() - naive.getTime();
+  const asZoned = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  const offsetMs = asZoned - naive.getTime();
+
   return new Date(naive.getTime() - offsetMs).toISOString();
 }
 

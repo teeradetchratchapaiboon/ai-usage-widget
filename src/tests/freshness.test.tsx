@@ -13,7 +13,7 @@ import i18n from "../i18n";
 import { useAppStore } from "../store";
 import type { ProviderStatus, UsageSummary } from "../lib/ipc";
 import type { Freshness } from "../lib/freshness";
-import { presentFreshness, formatAge } from "../lib/freshness";
+import { presentFreshness, formatAge, formatUpdatedAgo } from "../lib/freshness";
 import { bindingWindow, quotaWindows } from "../lib/quota";
 
 const mockInvoke = vi.fn();
@@ -164,6 +164,57 @@ describe("presentFreshness", () => {
 
   it("says nothing extra for a fresh reading", () => {
     expect(presentFreshness("fresh", 30).caption).toBeNull();
+  });
+});
+
+describe("formatUpdatedAgo", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
+  });
+
+  it("does not read 'Updated just now ago' under a minute", () => {
+    // "just now" is already a complete adverbial, so interpolating it into
+    // "Updated {{age}} ago" produced a sentence nobody would write.
+    expect(formatUpdatedAgo(30)).toBe("Updated just now");
+    expect(formatUpdatedAgo(59)).toBe("Updated just now");
+    expect(formatUpdatedAgo(0)).toBe("Updated just now");
+  });
+
+  it("switches to the interpolated form from a minute upward", () => {
+    expect(formatUpdatedAgo(60)).toBe("Updated 1 min ago");
+    expect(formatUpdatedAgo(2 * HOUR)).toBe("Updated 2 hrs ago");
+    expect(formatUpdatedAgo(2 * DAY)).toBe("Updated 2 days ago");
+  });
+
+  it("refuses to invent an age", () => {
+    expect(formatUpdatedAgo(null)).toBeNull();
+    expect(formatUpdatedAgo(-5)).toBeNull();
+    expect(formatUpdatedAgo(Number.NaN)).toBeNull();
+  });
+
+  it("never emits the doubled phrase at any age, in either language", async () => {
+    for (const lang of ["en", "th"]) {
+      await i18n.changeLanguage(lang);
+
+      // The exact string the old code produced: the "just now" adverbial fed
+      // through the "{{age}} ago" template. Built from the templates rather
+      // than hardcoded, so it stays correct if either translation changes.
+      const broken = i18n.t("freshness.updatedAgo", {
+        age: i18n.t("freshness.justNow"),
+      });
+
+      for (const secs of [0, 1, 30, 59, 60, 61, 3599, 3600, DAY, 3 * DAY]) {
+        expect(formatUpdatedAgo(secs)).not.toBe(broken);
+      }
+    }
+    await i18n.changeLanguage("en");
+  });
+
+  it("reads naturally in Thai too", async () => {
+    await i18n.changeLanguage("th");
+    expect(formatUpdatedAgo(30)).toBe("อัปเดตเมื่อครู่");
+    expect(formatUpdatedAgo(2 * DAY)).toBe("อัปเดตเมื่อ 2 วัน ที่แล้ว");
+    await i18n.changeLanguage("en");
   });
 });
 
@@ -369,6 +420,16 @@ describe("collapsed binding-window label", () => {
     );
 
     expect(screen.getByText(/CX 5h 24%/)).toBeTruthy();
+  });
+
+  it("does not put 'just now ago' in the collapsed tooltip", async () => {
+    // The tooltip used to build the phrase itself instead of calling the
+    // shared helper, so it reproduced the bug independently.
+    await renderCollapsed(providerWith("fresh", 20));
+
+    const chip = screen.getByText(/CX W/);
+    expect(chip.getAttribute("title")).toContain("Updated just now");
+    expect(chip.getAttribute("title")).not.toContain("just now ago");
   });
 
   it("flags a stale binding reading and explains it on hover", async () => {
