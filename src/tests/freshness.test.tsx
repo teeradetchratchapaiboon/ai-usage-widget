@@ -304,6 +304,59 @@ describe("CompactWidget freshness rendering", () => {
   });
 });
 
+// ─── Header controls ────────────────────────────────────────────────────────
+
+describe("widget header controls", () => {
+  beforeEach(async () => {
+    resetStore();
+    await i18n.changeLanguage("en");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("offers hide-to-tray and no longer offers maximize", async () => {
+    // Maximizing persisted the screen width as the widget's own size, which
+    // is how it came back as a letterbox pinned across the display.
+    mockWith([providerWith("fresh", 30)]);
+    await renderWidget();
+
+    const labels = [...document.querySelectorAll("button")].map((b) =>
+      b.getAttribute("aria-label"),
+    );
+
+    expect(labels).toContain("Hide to tray");
+    expect(labels).not.toContain("Maximize");
+  });
+
+  it("hides rather than closes, so collection keeps running", async () => {
+    mockWith([providerWith("fresh", 30)]);
+    await renderWidget();
+
+    const hide = [...document.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Hide to tray",
+    );
+    await act(async () => {
+      hide!.click();
+    });
+
+    expect(mockInvoke.mock.calls.some((c) => c[0] === "hide_widget")).toBe(true);
+    // Nothing that would tear the window down
+    expect(mockInvoke.mock.calls.some((c) => String(c[0]).includes("close"))).toBe(false);
+  });
+
+  it("explains in the tooltip that the tray brings it back", async () => {
+    mockWith([providerWith("fresh", 30)]);
+    await renderWidget();
+
+    const hide = [...document.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Hide to tray",
+    );
+    expect(hide?.getAttribute("title")).toContain("tray");
+  });
+});
+
 // ─── Collapsed summary ──────────────────────────────────────────────────────
 
 describe("collapsed binding-window label", () => {

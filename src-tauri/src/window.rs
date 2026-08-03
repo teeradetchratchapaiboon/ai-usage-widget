@@ -168,13 +168,24 @@ impl WindowManager {
 
     /// Persist the window size to config.
     ///
-    /// Collapsing fires a resize like any other, so without this floor the
+    /// Collapsing fires a resize like any other, so without the floor the
     /// header-strip height becomes the widget's remembered size and the next
     /// launch is a 40-pixel sliver with no visible way out.
+    ///
+    /// The ceiling exists for the mirror-image failure: a window snapped or
+    /// maximized to the display also fires a resize, and remembering the screen
+    /// as the widget's own size left a letterbox stretched across the desktop.
+    /// Neither extreme is a size anyone chose for a desk widget.
     pub fn persist_size(&self, width: u32, height: u32) {
         if height < Self::MIN_PERSISTABLE_HEIGHT {
             return;
         }
+        if width > crate::config::MAX_SENSIBLE_WIDGET_WIDTH
+            || height > crate::config::MAX_SENSIBLE_WIDGET_HEIGHT
+        {
+            return;
+        }
+
         let mut cfg = self.config.lock().unwrap();
         cfg.width = width;
         cfg.height = height;
@@ -514,7 +525,10 @@ mod tests {
         assert!(wm.is_always_on_top());
         assert_eq!(
             wm.compact_widget_size(),
-            (340, crate::config::DEFAULT_WIDGET_HEIGHT)
+            (
+                crate::config::DEFAULT_WIDGET_WIDTH,
+                crate::config::DEFAULT_WIDGET_HEIGHT
+            )
         );
     }
 
@@ -611,7 +625,7 @@ mod tests {
     fn test_current_config_snapshot() {
         let wm = WindowManager::new(WindowConfig::default(), &test_data_dir());
         let cfg = wm.current_config();
-        assert_eq!(cfg.width, 340);
+        assert_eq!(cfg.width, crate::config::DEFAULT_WIDGET_WIDTH);
         assert_eq!(cfg.height, crate::config::DEFAULT_WIDGET_HEIGHT);
         assert!(cfg.always_on_top);
         assert!(!cfg.click_through);
@@ -676,11 +690,36 @@ mod collapse_persistence_tests {
         // a user drag. Storing that height would reopen the widget as a strip
         // too short to show the control that expands it again.
         let wm = manager();
-        let (_, before) = wm.compact_widget_size();
+        let (width, before) = wm.compact_widget_size();
 
-        wm.persist_size(340, 40);
+        wm.persist_size(width, 40);
 
-        assert_eq!(wm.compact_widget_size(), (340, before));
+        assert_eq!(wm.compact_widget_size(), (width, before));
+    }
+
+    #[test]
+    fn test_a_maximized_size_is_not_remembered_as_the_widget_size() {
+        // Maximizing fired a resize like any other, so the screen dimensions
+        // became the widget's own. A later restore paired that width with the
+        // normal height and left a letterbox stretched across the display.
+        let wm = manager();
+        let (width, height) = wm.compact_widget_size();
+
+        wm.persist_size(2560, 1400);
+
+        assert_eq!(
+            wm.compact_widget_size(),
+            (width, height),
+            "a screen-sized resize must not become the remembered size"
+        );
+    }
+
+    #[test]
+    fn test_a_merely_wide_window_is_still_remembered() {
+        // The ceiling must not punish someone who genuinely widened it a bit
+        let wm = manager();
+        wm.persist_size(700, 600);
+        assert_eq!(wm.compact_widget_size(), (700, 600));
     }
 
     #[test]

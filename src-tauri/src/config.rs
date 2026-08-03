@@ -75,9 +75,7 @@ impl AppConfig {
         let mut config: Self = serde_json::from_str(&content)
             .map_err(|e| ConfigError::InvalidFormat(e.to_string()))?;
 
-        if config.window.height == LEGACY_WIDGET_HEIGHT {
-            config.window.height = DEFAULT_WIDGET_HEIGHT;
-        }
+        config.window.normalize();
 
         Ok(config)
     }
@@ -140,17 +138,36 @@ impl Default for ClaudeConfig {
     }
 }
 
+/// Width a fresh widget opens at, in logical pixels.
+pub const DEFAULT_WIDGET_WIDTH: u32 = 360;
+
 /// Height a fresh widget opens at, in logical pixels.
 ///
-/// Two providers now list a five-hour and a weekly window each, with their
-/// own reset times; the old 200 could not show that without scrolling.
-pub const DEFAULT_WIDGET_HEIGHT: u32 = 300;
+/// Measured rather than guessed. Header, footer and padding take 73px; a
+/// provider whose two windows each carry a freshness caption *and* a reset
+/// countdown takes about 111px, so two of them need ~222px and an excess row
+/// adds ~25px more. 340 leaves the rows 267px — enough for the worst case
+/// without the widget growing into screen clutter, which is the other half of
+/// the complaint.
+pub const DEFAULT_WIDGET_HEIGHT: u32 = 340;
 
-/// Height shipped before the per-window quota rows existed.
+/// Heights shipped by earlier builds, in order.
 ///
-/// A config still carrying it was never resized by hand, so it adopts the new
-/// default instead of keeping a size that now clips.
-pub const LEGACY_WIDGET_HEIGHT: u32 = 200;
+/// A config still carrying one of these was never resized by hand, so it
+/// adopts the current default rather than keeping a size that now clips.
+pub const LEGACY_WIDGET_HEIGHTS: [u32; 2] = [200, 300];
+
+/// Widest a remembered widget may be before it is treated as damage.
+///
+/// The widget used to offer a maximize button. Maximizing fired a resize like
+/// any other, so the screen width was persisted as the widget's own — and a
+/// later restore could pair that width with the normal height, leaving a
+/// letterbox pinned across the display. The button is gone; this repairs the
+/// configs it already wrote.
+pub const MAX_SENSIBLE_WIDGET_WIDTH: u32 = 900;
+
+/// Tallest a remembered widget may be, for the same reason.
+pub const MAX_SENSIBLE_WIDGET_HEIGHT: u32 = 900;
 
 /// Widget window configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,10 +197,33 @@ pub struct WindowConfig {
     pub collapsed: bool,
 }
 
+impl WindowConfig {
+    /// Bring a loaded size back into the range the widget can actually use.
+    ///
+    /// Two separate repairs, both for sizes written by earlier builds rather
+    /// than chosen by the user:
+    ///
+    /// - a height still equal to an old default is adopted forward, since it
+    ///   was never customised and now clips the second provider
+    /// - a size larger than any sensible widget is discarded, because the only
+    ///   way to get one was the maximize button that no longer exists
+    pub fn normalize(&mut self) {
+        if LEGACY_WIDGET_HEIGHTS.contains(&self.height) {
+            self.height = DEFAULT_WIDGET_HEIGHT;
+        }
+        if self.width > MAX_SENSIBLE_WIDGET_WIDTH {
+            self.width = DEFAULT_WIDGET_WIDTH;
+        }
+        if self.height > MAX_SENSIBLE_WIDGET_HEIGHT {
+            self.height = DEFAULT_WIDGET_HEIGHT;
+        }
+    }
+}
+
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            width: 340,
+            width: DEFAULT_WIDGET_WIDTH,
             height: DEFAULT_WIDGET_HEIGHT,
             always_on_top: true,
             click_through: false,
@@ -262,4 +302,56 @@ fn dirs_fallback_home() -> PathBuf {
         return PathBuf::from(home);
     }
     PathBuf::from(".")
+}
+
+#[cfg(test)]
+mod window_size_normalisation_tests {
+    use super::*;
+
+    fn cfg(width: u32, height: u32) -> WindowConfig {
+        WindowConfig {
+            width,
+            height,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_an_old_default_height_is_adopted_forward() {
+        // Never customised, and now too short for the per-window quota rows
+        for legacy in LEGACY_WIDGET_HEIGHTS {
+            let mut c = cfg(DEFAULT_WIDGET_WIDTH, legacy);
+            c.normalize();
+            assert_eq!(c.height, DEFAULT_WIDGET_HEIGHT, "legacy height {legacy}");
+        }
+    }
+
+    #[test]
+    fn test_a_screen_sized_config_is_repaired() {
+        // Written by the maximize button that no longer exists
+        let mut c = cfg(2560, 1400);
+        c.normalize();
+
+        assert_eq!(c.width, DEFAULT_WIDGET_WIDTH);
+        assert_eq!(c.height, DEFAULT_WIDGET_HEIGHT);
+    }
+
+    #[test]
+    fn test_a_wide_but_sane_size_is_left_alone() {
+        // Someone who dragged the widget wider on purpose keeps their size
+        let mut c = cfg(640, 560);
+        c.normalize();
+
+        assert_eq!((c.width, c.height), (640, 560));
+    }
+
+    #[test]
+    fn test_a_stretched_width_alone_is_repaired() {
+        // The reported shape: screen-wide but normal height
+        let mut c = cfg(2560, DEFAULT_WIDGET_HEIGHT);
+        c.normalize();
+
+        assert_eq!(c.width, DEFAULT_WIDGET_WIDTH);
+        assert_eq!(c.height, DEFAULT_WIDGET_HEIGHT);
+    }
 }

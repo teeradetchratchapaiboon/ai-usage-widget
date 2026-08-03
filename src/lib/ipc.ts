@@ -185,3 +185,13 @@ export async function setWidgetCollapsed(collapsed: boolean): Promise<void> {
 export async function getWidgetCollapsed(): Promise<boolean> {
   return invoke("get_widget_collapsed");
 }
+
+/**
+ * Hide the widget to the system tray.
+ *
+ * Hidden, not closed — collection carries on, and the tray's "Show Widget"
+ * item brings it back.
+ */
+export async function hideWidget(): Promise<void> {
+  return invoke("hide_widget");
+}

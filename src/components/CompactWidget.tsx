@@ -14,10 +14,9 @@ import {
   formatResetTime,
   formatCountdown,
 } from "../lib/format";
-import { openDashboard, setWidgetCollapsed, getWidgetCollapsed } from "../lib/ipc";
+import { openDashboard, setWidgetCollapsed, getWidgetCollapsed, hideWidget } from "../lib/ipc";
 import { bindingWindow, quotaWindows, remainingPct, type QuotaWindow } from "../lib/quota";
 import { presentFreshness, formatAge } from "../lib/freshness";
-import { toggleMaximizeWindow } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
 import { LoadingSkeleton } from "./LoadingSkeleton";
@@ -86,12 +85,13 @@ export function CompactWidget() {
         collapsed ? "px-3 py-1.5" : "p-3"
       }`}
     >
-      {/* Content stays readable when the window is enlarged or maximized */}
+      {/* Content stays readable if the window is resized by dragging */}
       <div className="flex flex-col gap-2 flex-1 min-h-0 w-full max-w-md mx-auto">
-      {/* Header doubles as the drag handle: the window has no title bar */}
+      {/* Header doubles as the drag handle: the window has no title bar.
+          Double-click used to maximize, which is how the widget ended up
+          stretched across the display. */}
       <div
         data-tauri-drag-region
-        onDoubleClick={() => void toggleMaximizeWindow()}
         className="flex items-center justify-between gap-2 min-w-0 cursor-move select-none"
       >
         <h1
@@ -174,21 +174,21 @@ export function CompactWidget() {
           </button>
           <button
             type="button"
-            title={t("window.maximize")}
-            aria-label={t("window.maximize")}
-            onClick={() => void toggleMaximizeWindow()}
+            title={t("actions.hideToTrayHint")}
+            aria-label={t("actions.hideToTray")}
+            onClick={() => void hideWidget()}
             className="w-5 h-5 flex items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors"
           >
+            {/* Arrow into a tray: hidden, not closed — collection continues
+                and the tray menu brings it back. */}
             <svg viewBox="0 0 16 16" className="w-3 h-3" aria-hidden="true">
-              <rect
-                x="2.5"
-                y="2.5"
-                width="11"
-                height="11"
-                rx="1.5"
+              <path
+                d="M8 2V9M8 9L5.5 6.5M8 9L10.5 6.5M2.5 10.5V12a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5v-1.5"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
             </svg>
           </button>
