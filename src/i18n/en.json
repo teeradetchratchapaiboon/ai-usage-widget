@@ -95,7 +95,9 @@
     "collapse": "Collapse",
     "refresh": "Refresh",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "hideToTray": "Hide to tray",
+    "hideToTrayHint": "Hide to the system tray — collection keeps running; reopen from the tray icon"
   },
   "update": {
     "available": "Update available",

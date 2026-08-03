@@ -343,13 +343,41 @@ pub async fn set_widget_collapsed(
         )
     };
 
+    // The remembered width, not whatever the window happens to be. Carrying the
+    // live width forward re-applied a maximized one to a normal-height window,
+    // which is how the widget ended up a letterbox across the screen.
+    let width = state
+        .window_manager
+        .current_config()
+        .width
+        .min(crate::config::MAX_SENSIBLE_WIDGET_WIDTH) as f64;
+
     // Order matters: the minimum has to allow the new height before we ask for it
     window
         .set_min_size(Some(LogicalSize::new(280.0, min_height)))
         .map_err(|e| e.to_string())?;
     window
-        .set_size(LogicalSize::new(current.width, height))
+        .set_size(LogicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Hide the widget to the system tray.
+///
+/// Hidden, not closed: the collector keeps running and the tray's "Show
+/// Widget" item brings it straight back. The window skips the taskbar, so the
+/// tray is deliberately the only way back — the same path the tray menu and
+/// the dashboard already use.
+#[cfg(not(test))]
+#[tauri::command]
+pub fn hide_widget(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "widget window is gone".to_string())?;
+    window.hide().map_err(|e| e.to_string())?;
 
     Ok(())
 }
