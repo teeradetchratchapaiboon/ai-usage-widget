@@ -13,6 +13,7 @@ import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
 import { useAppStore } from "../store";
 import type { ProviderStatus, UsageRecord, UsageSummary } from "../lib/ipc";
+import { toLocalInputValue, bangkokInputToIso } from "../components/Dashboard";
 
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -259,7 +260,39 @@ describe("Dashboard custom range", () => {
 
     expect(start?.type).toBe("datetime-local");
     expect(end?.type).toBe("datetime-local");
-    expect(start.value).not.toBe("");
+
+    // `datetime-local` blanks its value for anything outside this exact shape,
+    // so asserting only "not empty" hid *why* it could be empty. This failed on
+    // CI while passing locally: the seed was built from locale formatting,
+    // which is free to vary by ICU build and by the hour of day.
+    expect(start.value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    expect(end.value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    expect(start.value < end.value).toBe(true);
+  });
+
+  it("round-trips a value through the Bangkok conversion unchanged", () => {
+    // The two helpers are inverses; if either drifts, ranges silently shift.
+    for (const hour of [0, 1, 7, 12, 17, 23]) {
+      const instant = new Date(Date.UTC(2026, 6, 25, hour, 30, 0));
+      const local = toLocalInputValue(instant);
+      const iso = bangkokInputToIso(local);
+
+      expect(iso, `hour ${hour}`).not.toBeNull();
+      expect(new Date(iso!).getTime()).toBe(instant.getTime());
+    }
+  });
+
+  it("seeds a usable value at every hour of the day", () => {
+    // The failure only appeared around midnight Bangkok time, so every hour is
+    // exercised rather than whichever one the suite happens to run in.
+    for (let hour = 0; hour < 24; hour++) {
+      const instant = new Date(Date.UTC(2026, 6, 25, hour, 30, 0));
+      const el = document.createElement("input");
+      el.type = "datetime-local";
+      el.value = toLocalInputValue(instant);
+
+      expect(el.value, `UTC hour ${hour} produced "${toLocalInputValue(instant)}"`).not.toBe("");
+    }
   });
 
   it("rejects a range whose start is not before its end", async () => {

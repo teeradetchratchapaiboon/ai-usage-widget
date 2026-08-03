@@ -120,6 +120,7 @@
     "expired": "รอบหมดแล้ว",
     "unknown": "ไม่ทราบอายุ",
     "updatedAgo": "อัปเดตเมื่อ {{age}} ที่แล้ว",
+    "updatedJustNow": "อัปเดตเมื่อครู่",
     "lastKnown": "ค่าล่าสุดที่ทราบ",
     "lastKnownAgo": "ข้อมูลเก่า {{age}} ที่แล้ว",
     "waitingForReading": "รอค่าโควตาใหม่",
