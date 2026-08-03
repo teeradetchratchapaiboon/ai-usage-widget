@@ -32,7 +32,7 @@
 
 | ฟีเจอร์                 | รายละเอียด                                                      |
 | ----------------------- | --------------------------------------------------------------- |
-| 📊 Compact Widget       | หน้าต่าง 340×300px always-on-top แสดง Token usage + โควตาคงเหลือ |
+| 📊 Compact Widget       | หน้าต่าง 360×340px always-on-top แสดง Token usage + โควตาคงเหลือ |
 | 📈 Dashboard            | โควตาคงเหลือปัจจุบัน + กราฟประวัติ (Hourly/Daily/Weekly/Monthly) |
 | 🕰️ Quota Freshness      | บอกอายุของค่าโควตา และไม่แสดงค่าเก่าเหมือนค่าสด                 |
 | 🔒 Zero-Token Guarantee | ไม่สร้าง AI inference request ใดๆ ตลอดการทำงาน                  |
@@ -50,7 +50,7 @@
 
 ## Screenshots
 
-### Compact Widget (340×300)
+### Compact Widget (360×340)
 
 ![Compact widget](docs/screenshots/widget.png)
 
@@ -141,7 +141,7 @@ npm run tauri build
 
 ### เริ่มต้นใช้งาน (First Launch)
 
-1. เปิดโปรแกรม — จะเห็น **Compact Widget** (340×300px) ปรากฏมุมจอ
+1. เปิดโปรแกรม — จะเห็น **Compact Widget** (360×340px) ปรากฏมุมจอ
 2. โปรแกรมจะเริ่มเก็บข้อมูลจาก Codex/Claude อัตโนมัติทันที
 3. ถ้า provider ไม่พร้อม (ยังไม่ได้ใช้/ไม่มีข้อมูล) จะแสดง "ไม่มีข้อมูล"
 4. System Tray icon จะปรากฏที่ taskbar — คลิกขวาเพื่อดูเมนู
@@ -265,6 +265,22 @@ Bar chart แสดงสัดส่วน:
 - เมื่อพบ (เช่น เปิดเกม, ดูวิดีโอ fullscreen): **Widget ซ่อนอัตโนมัติ**
 - เมื่อออกจาก fullscreen: **Widget กลับมาเอง**
 - ไม่ต้องตั้งค่าอะไร — ทำงานอัตโนมัติ
+
+---
+
+### ปุ่มบนหัว Widget
+
+| ปุ่ม | ทำอะไร |
+| --- | --- |
+| ⌃ / ⌄ | **พับ/กาง** — พับเหลือแถบหัว 40px แสดงเฉพาะหน้าต่างโควตาที่บีบที่สุด สถานะนี้ถูกจำข้ามการเปิดโปรแกรม |
+| ⤓ | **ซ่อนลงถาดระบบ** — ซ่อน ไม่ใช่ปิด เก็บข้อมูลต่อตามปกติ เรียกกลับจากไอคอนในถาด → "แสดงวิดเจ็ต" |
+| ⛶ | **เปิด Dashboard** — widget จะถูกซ่อนระหว่างเปิด dashboard (สองโหมดนี้แยกกัน) |
+
+**ไม่มีปุ่มขยายเต็มจอ** — เดิมมี แต่การขยายทำให้ระบบจำ "ขนาดจอ" เป็นขนาด widget แล้วตอนย่อกลับได้เป็นแถบยาวพาดจอ ตอนนี้ปิด `maximizable` ไปเลย (รวมถึงการลากไปชนขอบจอ) ส่วนการลากขอบปรับขนาดเองยังทำได้ปกติ
+
+ขนาดเริ่มต้น 360×340 มาจากการวัดจริง: หัว+ท้าย+ขอบ 73px, provider ที่มีครบทั้งสองหน้าต่างพร้อมป้ายอายุและเวลารีเซ็ต ~111px ต่อราย
+
+**ตอนซ่อนอยู่ widget จะหยุด poll** — webview ยังทำงานอยู่และ WebView2 ก็ยังรายงานว่า `document.visibilityState === "visible"` ทั้งที่หน้าต่างถูกซ่อน ฝั่ง Rust จึงส่ง event `widget-visibility` มาบอกตรง ๆ พอกลับมาแสดงจะดึงข้อมูลใหม่ทันที ไม่รอรอบถัดไป
 
 ---
 
@@ -563,7 +579,7 @@ npm run tauri build
 ai-usage-widget/
 ├── src/                          # React frontend
 │   ├── components/
-│   │   ├── CompactWidget.tsx     # Main 340×300px widget
+│   │   ├── CompactWidget.tsx     # Main 360×340px widget
 │   │   ├── Dashboard.tsx         # Expanded charts view
 │   │   ├── Settings.tsx          # Settings panel
 │   │   ├── UpdateBanner.tsx      # Update notification

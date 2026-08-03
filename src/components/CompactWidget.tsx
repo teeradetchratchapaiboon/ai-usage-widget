@@ -1,7 +1,8 @@
 /**
- * CompactWidget - Main 340×200px compact widget view.
+ * CompactWidget - the always-on-top compact widget (360x340 by default).
  *
- * Displays token usage summary per provider with auto-refresh every 10 seconds.
+ * Shows each provider's quota windows with their freshness, refreshing every
+ * 10 seconds while it is on screen.
  * Uses Windows 11 glass (Acrylic) visual effect via backdrop-filter.
  */
 
@@ -14,9 +15,16 @@ import {
   formatResetTime,
   formatCountdown,
 } from "../lib/format";
-import { openDashboard, setWidgetCollapsed, getWidgetCollapsed, hideWidget } from "../lib/ipc";
+import {
+  openDashboard,
+  setWidgetCollapsed,
+  getWidgetCollapsed,
+  hideWidget,
+  WIDGET_VISIBILITY_EVENT,
+} from "../lib/ipc";
 import { bindingWindow, quotaWindows, remainingPct, type QuotaWindow } from "../lib/quota";
 import { presentFreshness, formatUpdatedAgo } from "../lib/freshness";
+import { onAppEvent } from "../lib/tauri";
 import { StatusDot } from "./StatusDot";
 import { ProviderMeter } from "./ProviderMeter";
 import { LoadingSkeleton } from "./LoadingSkeleton";
@@ -30,6 +38,9 @@ export function CompactWidget() {
   const { t } = useTranslation();
   const { usage, providers, usageLoading, fetchUsage, fetchProviderStatus } = useAppStore();
   const [collapsed, setCollapsed] = useState(false);
+  // Assumed on screen until told otherwise: the widget is visible at startup,
+  // and a missed event must never leave it silently not updating.
+  const [onScreen, setOnScreen] = useState(true);
 
   const toggleCollapsed = () => {
     const next = !collapsed;
@@ -58,8 +69,18 @@ export function CompactWidget() {
       });
   }, []);
 
-  // Fetch on mount and every 10 seconds
+  // Hiding to the tray leaves the webview running, and WebView2 keeps
+  // reporting `document.visibilityState === "visible"` for a hidden native
+  // window, so the backend says so explicitly instead.
+  useEffect(() => onAppEvent<boolean>(WIDGET_VISIBILITY_EVENT, setOnScreen), []);
+
+  // Fetch on mount and every 10 seconds — but only while on screen. Polling
+  // into a window sitting in the tray is work nobody can see the result of.
   useEffect(() => {
+    if (!onScreen) return;
+
+    // Immediately on becoming visible again: whatever was on screen when it
+    // was hidden is by then as old as the time it spent hidden.
     fetchUsage();
     fetchProviderStatus();
 
@@ -69,7 +90,7 @@ export function CompactWidget() {
     }, 10_000);
 
     return () => clearInterval(interval);
-  }, [fetchUsage, fetchProviderStatus]);
+  }, [onScreen, fetchUsage, fetchProviderStatus]);
 
   if (usageLoading && !usage) {
     return (

@@ -382,24 +382,38 @@ fn open_dashboard_blocking(app: &tauri::AppHandle, tab: &str) {
     }
 }
 
-/// Hide the compact widget while the dashboard has the screen.
+/// Event carrying whether the widget's window is on screen.
+///
+/// The webview keeps running while the window is hidden, and WebView2 does not
+/// report `document.visibilityState` for a hidden native window — measured, it
+/// stays `"visible"`. The frontend therefore cannot notice on its own that
+/// nobody is looking, and has to be told, or it keeps polling into a window
+/// that is not on screen.
+pub const WIDGET_VISIBILITY_EVENT: &str = "widget-visibility";
+
+/// Hide the compact widget, and tell the webview it is off screen.
+///
+/// Both halves live here so that no caller can do one without the other:
+/// four separate paths change the widget's visibility.
 #[cfg(not(test))]
-fn hide_widget(app: &tauri::AppHandle) {
-    use tauri::Manager;
+pub fn hide_widget(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
 
     if let Some(widget) = app.get_webview_window("main") {
         let _ = widget.hide();
+        let _ = app.emit(WIDGET_VISIBILITY_EVENT, false);
     }
 }
 
-/// Put the compact widget back on screen.
+/// Put the compact widget back on screen, and say so.
 #[cfg(not(test))]
-fn show_widget(app: &tauri::AppHandle) {
-    use tauri::Manager;
+pub fn show_widget(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
 
     if let Some(widget) = app.get_webview_window("main") {
         let _ = widget.show();
         let _ = widget.set_focus();
+        let _ = app.emit(WIDGET_VISIBILITY_EVENT, true);
     }
 }
 
@@ -524,5 +538,25 @@ mod tests {
         // Unregistering when not registered should be idempotent (no error)
         let result = unregister_autostart();
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod visibility_event_tests {
+    #[test]
+    fn test_the_event_name_matches_the_frontend_constant() {
+        // The two sides agree by convention only; if this name changes on one
+        // side the widget silently keeps polling into a hidden window.
+        let ts = std::fs::read_to_string("../src/lib/ipc.ts")
+            .expect("frontend ipc.ts should be readable from the crate");
+
+        assert!(
+            ts.contains(&format!(
+                "export const WIDGET_VISIBILITY_EVENT = \"{}\"",
+                super::WIDGET_VISIBILITY_EVENT
+            )),
+            "src/lib/ipc.ts must declare WIDGET_VISIBILITY_EVENT as {:?}",
+            super::WIDGET_VISIBILITY_EVENT
+        );
     }
 }

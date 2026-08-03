@@ -264,11 +264,12 @@ pub fn show_widget(app: tauri::AppHandle) -> Result<(), String> {
         dashboard.close().map_err(|e| e.to_string())?;
     }
 
-    let window = app
-        .get_webview_window("main")
+    // Absent window is still an error worth reporting, but the show itself
+    // goes through the shared helper so the visibility event cannot be missed.
+    app.get_webview_window("main")
         .ok_or_else(|| "widget window is gone".to_string())?;
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
+    crate::tray::show_widget(&app);
+
     Ok(())
 }
 
@@ -374,10 +375,9 @@ pub async fn set_widget_collapsed(
 pub fn hide_widget(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
 
-    let window = app
-        .get_webview_window("main")
+    app.get_webview_window("main")
         .ok_or_else(|| "widget window is gone".to_string())?;
-    window.hide().map_err(|e| e.to_string())?;
+    crate::tray::hide_widget(&app);
 
     Ok(())
 }

@@ -195,3 +195,12 @@ export async function getWidgetCollapsed(): Promise<boolean> {
 export async function hideWidget(): Promise<void> {
   return invoke("hide_widget");
 }
+
+/**
+ * Event carrying whether the widget's window is on screen.
+ *
+ * Must match `crate::tray::WIDGET_VISIBILITY_EVENT`. The webview keeps running
+ * while the window is hidden and WebView2 still reports the document as
+ * visible, so this is the only reliable signal.
+ */
+export const WIDGET_VISIBILITY_EVENT = "widget-visibility";
