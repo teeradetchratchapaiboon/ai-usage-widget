@@ -15,6 +15,23 @@ import type { ProviderStatus, UsageSummary } from "../lib/ipc";
 import type { Freshness } from "../lib/freshness";
 import { presentFreshness, formatAge, formatUpdatedAgo } from "../lib/freshness";
 import { bindingWindow, quotaWindows } from "../lib/quota";
+import { WIDGET_VISIBILITY_EVENT } from "../lib/ipc";
+
+/** Handlers registered through `onAppEvent`, so tests can fire the event. */
+const appEventHandlers = new Map<string, (payload: unknown) => void>();
+
+function emitAppEvent(event: string, payload: unknown) {
+  appEventHandlers.get(event)?.(payload);
+}
+
+vi.mock("../lib/tauri", () => ({
+  isTauri: () => false,
+  onAppEvent: (event: string, handler: (payload: unknown) => void) => {
+    appEventHandlers.set(event, handler);
+    return () => appEventHandlers.delete(event);
+  },
+  toggleMaximizeWindow: async () => {},
+}));
 
 const mockInvoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -360,10 +377,14 @@ describe("CompactWidget freshness rendering", () => {
 describe("widget header controls", () => {
   beforeEach(async () => {
     resetStore();
+    // The polling test advances the clock rather than waiting out 10s of real
+    // time, so the interval has to be under test control.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     await i18n.changeLanguage("en");
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -395,6 +416,50 @@ describe("widget header controls", () => {
     expect(mockInvoke.mock.calls.some((c) => c[0] === "hide_widget")).toBe(true);
     // Nothing that would tear the window down
     expect(mockInvoke.mock.calls.some((c) => String(c[0]).includes("close"))).toBe(false);
+  });
+
+  it("stops polling once the backend says it is off screen", async () => {
+    // The webview keeps running while hidden and WebView2 still reports the
+    // document as visible, so without the event it would poll into a window
+    // sitting in the tray.
+    mockWith([providerWith("fresh", 30)]);
+    await renderWidget();
+
+    const countPolls = () =>
+      mockInvoke.mock.calls.filter(
+        (c) => c[0] === "get_current_usage" || c[0] === "get_provider_status",
+      ).length;
+
+    const whileVisible = countPolls();
+    expect(whileVisible).toBeGreaterThan(0);
+
+    await act(async () => {
+      emitAppEvent(WIDGET_VISIBILITY_EVENT, false);
+    });
+    const afterHiding = countPolls();
+
+    await act(async () => {
+      vi.advanceTimersByTime(35_000);
+    });
+    expect(countPolls()).toBe(afterHiding);
+  });
+
+  it("refetches immediately when it comes back on screen", async () => {
+    // Whatever was rendered when it was hidden is by then as old as the time
+    // it spent hidden, so waiting out the next tick would show stale numbers.
+    mockWith([providerWith("fresh", 30)]);
+    await renderWidget();
+
+    await act(async () => {
+      emitAppEvent(WIDGET_VISIBILITY_EVENT, false);
+    });
+    const before = mockInvoke.mock.calls.length;
+
+    await act(async () => {
+      emitAppEvent(WIDGET_VISIBILITY_EVENT, true);
+    });
+
+    expect(mockInvoke.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("explains in the tooltip that the tray brings it back", async () => {
