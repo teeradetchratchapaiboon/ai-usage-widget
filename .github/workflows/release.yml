@@ -1,0 +1,98 @@
+name: Release Windows installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installer:
+    name: Build and publish installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Resolve release version
+        id: release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+            throw "Release tag must look like v1.2.3. Received: $tag"
+          }
+
+          "version=$($tag.Substring(1))" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Verify version matches tag
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+
+          if ($tauriVersion -ne $env:RELEASE_VERSION) {
+            throw "src-tauri/tauri.conf.json version $tauriVersion does not match tag $env:RELEASE_VERSION"
+          }
+          if ($packageVersion -ne $env:RELEASE_VERSION) {
+            throw "package.json version $packageVersion does not match tag $env:RELEASE_VERSION"
+          }
+
+      - run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Frontend build and typecheck
+        run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: Build NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Prepare the only release asset
+        id: asset
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($installers.Count)"
+          }
+
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $asset = "release/AI-Usage-Widget-Windows-x64-Setup.exe"
+          Copy-Item $installers[0].FullName $asset
+          "path=$asset" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: AI Usage Widget ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: ${{ steps.asset.outputs.path }}
