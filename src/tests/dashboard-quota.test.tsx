@@ -301,11 +301,17 @@ describe("Dashboard custom range", () => {
     const before = mockInvoke.mock.calls.filter((c) => c[0] === "get_usage_history").length;
 
     await act(async () => {
+      // Keep every intermediate edit invalid. Otherwise this test becomes
+      // date-dependent: once 2026-08-10 is no longer in the future, changing
+      // start before end briefly creates a valid range and triggers a query.
       fireEvent.change(document.getElementById("range-start")!, {
-        target: { value: "2026-08-10T10:00" },
+        target: { value: "" },
       });
       fireEvent.change(document.getElementById("range-end")!, {
         target: { value: "2026-08-01T10:00" },
+      });
+      fireEvent.change(document.getElementById("range-start")!, {
+        target: { value: "2026-08-10T10:00" },
       });
     });
 
