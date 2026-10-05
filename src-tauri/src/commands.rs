@@ -604,11 +604,18 @@ pub async fn restore_data(path: String, state: tauri::State<'_, AppState>) -> Re
         return Err(format!("Backup file does not exist: {}", path));
     }
 
+    // Hold the dedup lock across the restore so no collection cycle can
+    // deduplicate against a bloom filter that no longer matches the DB.
+    let mut dedup = state.dedup.lock().await;
     state
         .storage
         .restore(&src)
         .await
-        .map_err(|e| format!("Restore failed: {}", e))
+        .map_err(|e| format!("Restore failed: {}", e))?;
+    dedup
+        .reload()
+        .await
+        .map_err(|e| format!("Restore succeeded but reloading dedup cache failed: {}", e))
 }
 
 /// Check GitHub API for available updates (compare semver).

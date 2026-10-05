@@ -59,6 +59,26 @@ impl DeduplicationEngine {
     ///
     /// Bloom filter is configured for ~1M items with ~1% false positive rate.
     pub async fn new(db: Arc<SqlitePool>) -> Result<Self, StorageError> {
+        let bloom = Self::load_bloom(db.as_ref()).await?;
+
+        Ok(Self {
+            seen_fingerprints: bloom,
+            db,
+        })
+    }
+
+    /// Rebuild the Bloom filter from the current `seen_fingerprints` table.
+    ///
+    /// Call this after the DB contents were replaced behind the engine's back
+    /// (e.g. restore). Otherwise restored fingerprints miss the Bloom filter,
+    /// are treated as "definitely not seen" and their events get stored twice.
+    pub async fn reload(&mut self) -> Result<(), StorageError> {
+        self.seen_fingerprints = Self::load_bloom(self.db.as_ref()).await?;
+        Ok(())
+    }
+
+    /// Build a Bloom filter preloaded with every fingerprint in the database.
+    async fn load_bloom(db: &SqlitePool) -> Result<bloomfilter::Bloom<[u8; 32]>, StorageError> {
         // Bloom filter parameters:
         // - Expected items: 1,000,000
         // - False positive rate: ~1% (0.01)
@@ -67,7 +87,7 @@ impl DeduplicationEngine {
 
         // Preload existing fingerprints from database
         let rows: Vec<(Vec<u8>,)> = sqlx::query_as("SELECT fingerprint FROM seen_fingerprints")
-            .fetch_all(db.as_ref())
+            .fetch_all(db)
             .await
             .map_err(|e| {
                 StorageError::QueryFailed(format!("failed to preload fingerprints: {}", e))
@@ -81,10 +101,7 @@ impl DeduplicationEngine {
             }
         }
 
-        Ok(Self {
-            seen_fingerprints: bloom,
-            db,
-        })
+        Ok(bloom)
     }
 
     /// Deduplicate a list of raw events using two-phase checking:
@@ -210,6 +227,40 @@ mod tests {
         let fp1 = compute_fingerprint(&event1);
         let fp2 = compute_fingerprint(&event2);
         assert_ne!(fp1, fp2, "None model vs Some model must differ");
+    }
+
+    #[tokio::test]
+    async fn reload_picks_up_fingerprints_written_behind_its_back() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE seen_fingerprints (fingerprint BLOB PRIMARY KEY, first_seen_at TEXT NOT NULL DEFAULT (datetime('now')))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut engine = DeduplicationEngine::new(Arc::new(pool.clone()))
+            .await
+            .unwrap();
+
+        // Simulate a restore: the fingerprint lands in SQLite without mark_seen().
+        let event = make_event("codex", Some("gpt-4"), Some(300));
+        let fp = compute_fingerprint(&event);
+        sqlx::query("INSERT INTO seen_fingerprints (fingerprint) VALUES (?)")
+            .bind(fp.0.as_slice())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let before = engine.deduplicate(vec![event.clone()]).await.unwrap();
+        assert_eq!(before.len(), 1, "stale bloom filter misses the fingerprint");
+
+        engine.reload().await.unwrap();
+        let after = engine.deduplicate(vec![event]).await.unwrap();
+        assert!(after.is_empty(), "reloaded bloom filter must filter it out");
     }
 
     #[test]

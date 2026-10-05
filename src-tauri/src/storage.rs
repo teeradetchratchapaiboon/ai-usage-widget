@@ -658,9 +658,26 @@ impl StorageLayer {
         Ok(())
     }
 
-    /// Restore database from a backup file.
-    /// Verifies checksum before applying, backs up the current database first for safety,
-    /// then replaces the current database with the backup.
+    /// Restore database contents from a backup file, in place.
+    ///
+    /// Validation happens before anything is touched:
+    /// - the source must exist and must not be the live database or the
+    ///   `<db>.pre-restore.bak` safety backup (restoring the live DB onto itself
+    ///   would empty it, and `backup()` removes the safety path first, which
+    ///   would delete the very file we are restoring from);
+    /// - if the source is listed in `backup_history`, its checksum must match;
+    /// - the source must pass `PRAGMA integrity_check` and contain every table
+    ///   in [`RESTORED_TABLES`].
+    ///
+    /// Only then is a safety backup written and the [`RESTORED_TABLES`] replaced
+    /// inside a single transaction (all-or-nothing). Tracking tables are kept
+    /// as-is, see [`RESTORED_TABLES`].
+    ///
+    /// The source is ATTACHed to one pooled connection instead of copying the
+    /// file over the live DB, so the pool is never closed: this StorageLayer and
+    /// every holder of a pool clone (e.g. `DeduplicationEngine`) keep working
+    /// right after the restore. Callers must reload any in-memory caches derived
+    /// from the restored tables (the dedup bloom filter).
     pub async fn restore(&self, src: &Path) -> Result<(), StorageError> {
         // Verify source file exists
         if !src.exists() {
@@ -668,6 +685,29 @@ impl StorageLayer {
                 "backup file does not exist: {}",
                 src.display()
             )));
+        }
+
+        // Refuse to restore from the live DB or from the path the safety backup
+        // is about to overwrite.
+        let safety_backup_path = self.db_path.with_extension("pre-restore.bak");
+        let canonical_src = std::fs::canonicalize(src).map_err(|e| {
+            StorageError::RestoreFailed(format!(
+                "failed to resolve backup path {}: {}",
+                src.display(),
+                e
+            ))
+        })?;
+        let mut forbidden = vec![&self.db_path];
+        if safety_backup_path.exists() {
+            forbidden.push(&safety_backup_path);
+        }
+        for path in forbidden {
+            if std::fs::canonicalize(path).ok().as_deref() == Some(canonical_src.as_path()) {
+                return Err(StorageError::RestoreFailed(format!(
+                    "cannot restore from {}: it is the live database or its safety backup",
+                    src.display()
+                )));
+            }
         }
 
         // Compute SHA-256 checksum of the source file
@@ -695,36 +735,129 @@ impl StorageLayer {
             }
         }
 
+        // ATTACH is per-connection, so everything below runs on this one
+        // connection while the rest of the pool keeps serving queries.
+        let mut conn = self.pool.acquire().await.map_err(|e| {
+            StorageError::RestoreFailed(format!("failed to acquire connection: {}", e))
+        })?;
+        // `Executor` methods (boxed futures) instead of `query(..).execute(conn)`,
+        // see restore_from_attached for why.
+        use sqlx::Executor;
+        let attach = sqlx::query("ATTACH DATABASE ?1 AS restore_src")
+            .bind(src.to_string_lossy().to_string());
+        (&mut *conn).execute(attach).await.map_err(|e| {
+            StorageError::RestoreFailed(format!("failed to open backup file: {}", e))
+        })?;
+
+        let result = self
+            .restore_from_attached(&mut conn, &safety_backup_path)
+            .await;
+
+        // Always detach, whatever happened above. A connection that still has
+        // the source attached must never go back to the pool.
+        if let Err(e) = (&mut *conn).execute("DETACH DATABASE restore_src").await {
+            log::warn!("failed to detach restore source, closing connection: {}", e);
+            if let Err(e) = conn.close().await {
+                log::warn!("failed to close restore connection: {}", e);
+            }
+        }
+
+        result
+    }
+
+    /// Validate the attached `restore_src` database, write the safety backup and
+    /// copy [`RESTORED_TABLES`] into `main` in one transaction.
+    async fn restore_from_attached(
+        &self,
+        conn: &mut sqlx::SqliteConnection,
+        safety_backup_path: &Path,
+    ) -> Result<(), StorageError> {
+        // Statements below go through `Executor` methods directly (boxed
+        // futures) rather than `query(..).fetch_all(conn)`: the latter's
+        // generic async fn trips rustc's higher-ranked Send check once this
+        // future ends up inside a `#[tauri::command]`.
+        use sqlx::{Connection, Executor};
+
+        // Integrity check (also fails with "file is not a database" for non-SQLite files)
+        let rows = (&mut *conn)
+            .fetch_all("PRAGMA restore_src.integrity_check")
+            .await
+            .map_err(|e| {
+                StorageError::RestoreFailed(format!("backup is not a valid database: {}", e))
+            })?;
+        let messages: Vec<String> = rows
+            .iter()
+            .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
+            .collect();
+        if messages != ["ok"] {
+            return Err(StorageError::RestoreFailed(format!(
+                "backup failed integrity check: {}",
+                messages.join("; ")
+            )));
+        }
+
+        // Every restored table must exist in the source
+        let tables: Vec<String> = (&mut *conn)
+            .fetch_all("SELECT name FROM restore_src.sqlite_master WHERE type = 'table'")
+            .await
+            .map_err(|e| {
+                StorageError::RestoreFailed(format!("failed to read backup schema: {}", e))
+            })?
+            .iter()
+            .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
+            .collect();
+        for table in RESTORED_TABLES {
+            if !tables.iter().any(|t| t == table) {
+                return Err(StorageError::RestoreFailed(format!(
+                    "backup is missing table '{}'",
+                    table
+                )));
+            }
+        }
+
         // Backup current database first (safety)
-        let safety_backup_path = self.db_path.with_extension("pre-restore.bak");
-        self.backup(&safety_backup_path).await.map_err(|e| {
+        self.backup(safety_backup_path).await.map_err(|e| {
             StorageError::RestoreFailed(format!("failed to create safety backup: {:?}", e))
         })?;
 
-        // Force WAL checkpoint to flush all data to the main database file
-        // This ensures the WAL is empty before we close the pool and replace the file
-        sqlx::raw_sql("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(&self.pool)
-            .await
-            .map_err(|e| StorageError::RestoreFailed(format!("failed to checkpoint WAL: {}", e)))?;
-
-        // Close current pool
-        self.pool.close().await;
-
-        // Remove WAL and SHM files before copying (they're stale after replacement)
-        let wal_path = self.db_path.with_extension("db-wal");
-        let shm_path = self.db_path.with_extension("db-shm");
-        let _ = std::fs::remove_file(&wal_path);
-        let _ = std::fs::remove_file(&shm_path);
-
-        // Copy the backup file over the current database
-        std::fs::copy(src, &self.db_path).map_err(|e| {
-            StorageError::RestoreFailed(format!(
-                "failed to copy backup file to {}: {}",
-                self.db_path.display(),
-                e
-            ))
+        // Replace the restored tables atomically. Table and column names come
+        // from RESTORED_TABLES and our own schema, never from input, so
+        // format! is safe here.
+        let mut tx = Connection::begin(&mut *conn).await.map_err(|e| {
+            StorageError::RestoreFailed(format!("failed to begin transaction: {}", e))
         })?;
+        for table in RESTORED_TABLES {
+            let columns_sql = format!("SELECT name FROM pragma_table_info('{}', 'main')", table);
+            let columns: Vec<String> = (&mut *tx)
+                .fetch_all(columns_sql.as_str())
+                .await
+                .map_err(|e| {
+                    StorageError::RestoreFailed(format!(
+                        "failed to read columns of {}: {}",
+                        table, e
+                    ))
+                })?
+                .iter()
+                .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
+                .collect();
+            let cols = columns.join(", ");
+
+            let delete_sql = format!("DELETE FROM main.{}", table);
+            (&mut *tx).execute(delete_sql.as_str()).await.map_err(|e| {
+                StorageError::RestoreFailed(format!("failed to clear {}: {}", table, e))
+            })?;
+            let insert_sql = format!(
+                "INSERT INTO main.{t} ({c}) SELECT {c} FROM restore_src.{t}",
+                t = table,
+                c = cols
+            );
+            (&mut *tx).execute(insert_sql.as_str()).await.map_err(|e| {
+                StorageError::RestoreFailed(format!("failed to restore {}: {}", table, e))
+            })?;
+        }
+        tx.commit()
+            .await
+            .map_err(|e| StorageError::RestoreFailed(format!("failed to commit restore: {}", e)))?;
 
         Ok(())
     }
@@ -773,6 +906,17 @@ impl StorageLayer {
         self.restore(&backup_path).await
     }
 }
+
+/// Tables whose contents `restore()` replaces with the backup's rows.
+///
+/// Deliberately kept as-is:
+/// - `file_positions` / `collection_checkpoints`: the in-memory
+///   `ProviderRegistry` owns the live read offsets and rewrites them every
+///   cycle, so rewinding them would only cause log files to be re-read.
+/// - `backup_history`: keeps this install's backup records (including the
+///   safety backup written just before the restore) instead of rewinding them
+///   to whatever history the source file carried.
+const RESTORED_TABLES: [&str; 3] = ["usage_events", "seen_fingerprints", "settings"];
 
 /// SQL migration statements for all tables.
 const MIGRATION_SQL: &str = r#"
@@ -2875,5 +3019,156 @@ mod prop_tests_timestamp_consistency {
                 Ok(())
             })?;
         }
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+    use crate::error::StorageError;
+    use crate::query_types::{Granularity, TimeRange};
+    use crate::types::{EventFingerprint, EventType, ReconciledEvent, TokenUsage};
+    use tempfile::TempDir;
+
+    /// An event stamped "now" (so it counts towards today's totals) with a
+    /// unique fingerprint.
+    fn event_with_tokens(total: u64) -> ReconciledEvent {
+        let mut fp = [0u8; 32];
+        fp[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+        fp[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+        ReconciledEvent {
+            id: Uuid::new_v4(),
+            fingerprint: EventFingerprint::new(fp),
+            provider_id: "codex".to_string(),
+            event_type: EventType::TokenCount,
+            timestamp: Utc::now(),
+            model: Some("gpt-test".to_string()),
+            tokens: TokenUsage {
+                input_tokens: None,
+                cached_input_tokens: None,
+                output_tokens: None,
+                reasoning_tokens: None,
+                total_tokens: Some(total),
+            },
+            context_window: None,
+            quota: None,
+            session_hash: None,
+            project_hash: None,
+            reconciled_at: Utc::now(),
+            source_count: 1,
+        }
+    }
+
+    /// Storage containing a single 100-token event.
+    async fn storage_with_100_tokens(dir: &TempDir) -> (StorageLayer, std::path::PathBuf) {
+        let db_path = dir.path().join("live.db");
+        let storage = StorageLayer::new(&db_path).await.unwrap();
+        storage
+            .store_events(&[event_with_tokens(100)])
+            .await
+            .unwrap();
+        (storage, db_path)
+    }
+
+    async fn total_today(storage: &StorageLayer) -> Option<i64> {
+        storage
+            .get_current_summary()
+            .await
+            .unwrap()
+            .total_tokens_today
+    }
+
+    #[tokio::test]
+    async fn restore_keeps_storage_usable() {
+        let dir = TempDir::new().unwrap();
+        let (storage, db_path) = storage_with_100_tokens(&dir).await;
+        let backup_path = dir.path().join("backup.db");
+        storage.backup(&backup_path).await.unwrap();
+        storage
+            .store_events(&[event_with_tokens(50)])
+            .await
+            .unwrap();
+        assert_eq!(total_today(&storage).await, Some(150));
+
+        storage.restore(&backup_path).await.unwrap();
+
+        // Same StorageLayer, no reopen: reads and writes keep working.
+        assert_eq!(total_today(&storage).await, Some(100));
+        storage.store_events(&[event_with_tokens(7)]).await.unwrap();
+        assert_eq!(total_today(&storage).await, Some(107));
+        let range = TimeRange {
+            start: Utc::now() - Duration::days(1),
+            end: Utc::now() + Duration::minutes(1),
+        };
+        storage
+            .get_history(&range, Granularity::Hourly)
+            .await
+            .unwrap();
+
+        // The safety backup written by this restore cannot be the next source.
+        let safety = db_path.with_extension("pre-restore.bak");
+        assert!(safety.exists());
+        assert!(matches!(
+            storage.restore(&safety).await,
+            Err(StorageError::RestoreFailed(_))
+        ));
+        assert_eq!(total_today(&storage).await, Some(107));
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_non_sqlite_file() {
+        let dir = TempDir::new().unwrap();
+        let (storage, _) = storage_with_100_tokens(&dir).await;
+        let bogus = dir.path().join("bogus.db");
+        std::fs::write(&bogus, b"not a database").unwrap();
+
+        let result = storage.restore(&bogus).await;
+
+        assert!(
+            matches!(result, Err(StorageError::RestoreFailed(_))),
+            "got {:?}",
+            result
+        );
+        assert_eq!(total_today(&storage).await, Some(100));
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_db_without_expected_tables() {
+        let dir = TempDir::new().unwrap();
+        let (storage, _) = storage_with_100_tokens(&dir).await;
+        let foreign = dir.path().join("foreign.db");
+        let pool = SqlitePool::connect_with(
+            SqliteConnectOptions::new()
+                .filename(&foreign)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+        sqlx::query("CREATE TABLE foo(x)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let result = storage.restore(&foreign).await;
+
+        match result {
+            Err(StorageError::RestoreFailed(msg)) => {
+                assert!(msg.contains("usage_events"), "{}", msg)
+            }
+            other => panic!("expected RestoreFailed, got {:?}", other),
+        }
+        assert_eq!(total_today(&storage).await, Some(100));
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_current_database() {
+        let dir = TempDir::new().unwrap();
+        let (storage, db_path) = storage_with_100_tokens(&dir).await;
+
+        let result = storage.restore(&db_path).await;
+
+        assert!(matches!(result, Err(StorageError::RestoreFailed(_))));
+        assert_eq!(total_today(&storage).await, Some(100));
     }
 }
