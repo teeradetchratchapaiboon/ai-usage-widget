@@ -107,15 +107,50 @@
     "available": "Update available",
     "currentVersion": "Current version",
     "latestVersion": "Latest version",
-    "download": "Download",
+    "download": "Release page",
     "releaseNotes": "Release notes",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "installNow": "Update now",
+    "downloading": "Downloading… {{pct}}%",
+    "downloadingUnknown": "Downloading…",
+    "installing": "Installing, the app will restart…",
+    "failed": "Update failed",
+    "progressLabel": "Update download progress"
   },
   "errors": {
     "generic": "An error occurred",
     "connectionFailed": "Connection failed",
     "dataLoadFailed": "Failed to load data",
-    "saveFailed": "Failed to save"
+    "saveFailed": "Failed to save",
+    "code": {
+      "INVALID_LOCALE": "Unsupported language: {{value}}",
+      "INVALID_INTERVAL": "Collection interval must be between {{min}} and {{max}} seconds (got {{value}})",
+      "INVALID_RETENTION": "Data retention must be between {{min}} and {{max}} days (got {{value}})",
+      "THRESHOLD_OUT_OF_RANGE": "Notification thresholds must be between 0 and 100% (got {{value}})",
+      "THRESHOLD_ORDER": "The warning threshold ({{warning}}%) must be below the critical threshold ({{critical}}%)",
+      "INVALID_TIME_RANGE": "The start must be before the end",
+      "TIME_RANGE_TOO_LARGE": "The time range ({{days}} days) exceeds the maximum of {{max}} days",
+      "FUTURE_DATE": "The end time cannot be in the future",
+      "INVALID_PROVIDER_ID": "Invalid provider ID",
+      "SETTINGS_SAVE_FAILED": "Could not save settings",
+      "AUTOSTART_FAILED": "Could not change the autostart setting",
+      "WINDOW_SETTING_FAILED": "Could not apply the window setting",
+      "BACKUP_PATH_EMPTY": "Enter a backup file path",
+      "BACKUP_FAILED": "Backup failed",
+      "RESTORE_PATH_EMPTY": "Enter the backup file to restore",
+      "RESTORE_FILE_NOT_FOUND": "Backup file not found: {{path}}",
+      "RESTORE_FROM_LIVE_DATABASE": "Cannot restore from the live database or its safety backup",
+      "RESTORE_INVALID_BACKUP": "The file is not a valid AI Usage Widget backup",
+      "RESTORE_INTEGRITY_FAILED": "The backup file is damaged (integrity check failed)",
+      "RESTORE_CHECKSUM_MISMATCH": "The backup file has changed since it was created (checksum mismatch)",
+      "RESTORE_FAILED": "Restore failed",
+      "RESTORE_RELOAD_FAILED": "Data was restored, but reloading the cache failed. Restart the app.",
+      "UPDATE_BLOCKED": "The update check was blocked by the network policy",
+      "UPDATE_CHECK_FAILED": "Could not check for updates",
+      "UPDATE_NOT_AVAILABLE": "Automatic update is not available for this release. Use the release page instead.",
+      "UPDATE_INSTALL_FAILED": "Could not download or install the update",
+      "INTERNAL": "An unexpected error occurred"
+    }
   },
   "window": {
     "maximize": "Maximize / restore"

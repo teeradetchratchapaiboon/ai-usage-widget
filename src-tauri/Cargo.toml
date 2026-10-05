@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-widget"
-version = "0.1.0"
+version = "0.2.0"
 description = "Windows desktop widget showing AI plan usage and quota for Codex and Claude"
 authors = ["teeradetchratchapaiboon"]
 edition = "2021"
@@ -19,6 +19,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-log = "2"
+# In-app updater (signed latest.json from GitHub releases). Pinned: 2.13.x
+# requires tauri ^2.12 and this crate stays on the locked tauri 2.11.x.
+tauri-plugin-updater = "=2.12.0"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

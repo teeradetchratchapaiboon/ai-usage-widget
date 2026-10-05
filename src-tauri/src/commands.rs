@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::command_error::{backup_error, restore_error, CommandError, ErrorCode};
 use crate::config::AppConfig;
 use crate::freshness::QuotaTiming;
 use crate::provider::ProviderSummary;
@@ -34,6 +35,9 @@ pub struct AppState {
     /// pipeline the scheduler uses.
     pub dedup: Arc<Mutex<crate::dedup::DeduplicationEngine>>,
     pub reconciliation: Arc<crate::reconcile::ReconciliationEngine>,
+    /// Current UI locale, shared with the toast notifier so notification
+    /// titles follow a language switch without a restart.
+    pub locale: Arc<std::sync::RwLock<String>>,
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────────
@@ -581,9 +585,9 @@ pub async fn update_settings(
     settings: PartialSettings,
     #[cfg_attr(test, allow(unused_variables))] app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     // Validate inputs before applying
-    validate_settings(&settings).map_err(|e| format!("Settings validation failed: {}", e))?;
+    validate_settings(&settings)?;
 
     // Invariant: nothing below awaits while this guard is held, so a slow or
     // stuck subsystem cannot block every other user of the config.
@@ -596,12 +600,12 @@ pub async fn update_settings(
         &settings,
         config.notification_warning_pct,
         config.notification_critical_pct,
-    )
-    .map_err(|e| format!("Settings validation failed: {}", e))?;
+    )?;
 
     // Apply partial updates
     if let Some(ref locale) = settings.locale {
         config.locale = locale.clone();
+        *state.locale.write().unwrap_or_else(|p| p.into_inner()) = locale.clone();
     }
     if let Some(interval) = settings.collection_interval_secs {
         config.collection_interval_secs = interval;
@@ -651,10 +655,12 @@ pub async fn update_settings(
     #[cfg(not(test))]
     {
         if let Some(aot) = settings.always_on_top {
-            crate::window::tauri_ops::set_always_on_top(&app, &state.window_manager, aot)?;
+            crate::window::tauri_ops::set_always_on_top(&app, &state.window_manager, aot)
+                .map_err(|e| CommandError::new(ErrorCode::WindowSettingFailed, e))?;
         }
         if let Some(ct) = settings.click_through {
-            crate::window::tauri_ops::set_click_through(&app, &state.window_manager, ct)?;
+            crate::window::tauri_ops::set_click_through(&app, &state.window_manager, ct)
+                .map_err(|e| CommandError::new(ErrorCode::WindowSettingFailed, e))?;
         }
     }
 
@@ -667,80 +673,104 @@ pub async fn update_settings(
         } else {
             crate::tray::unregister_autostart().map_err(|e| e.to_string())
         };
-        result.map_err(|e| format!("Failed to update autostart: {}", e))?;
+        result.map_err(|e| {
+            CommandError::new(
+                ErrorCode::AutostartFailed,
+                format!("Failed to update autostart: {}", e),
+            )
+        })?;
     }
 
     // Persist to disk
-    config
-        .save_to_file(&state.config_path)
-        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    config.save_to_file(&state.config_path).map_err(|e| {
+        CommandError::new(
+            ErrorCode::SettingsSaveFailed,
+            format!("Failed to save settings: {}", e),
+        )
+    })?;
 
     Ok(())
 }
 
 /// Trigger backup to specified path.
 #[tauri::command]
-pub async fn backup_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub async fn backup_data(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError> {
     if path.is_empty() {
-        return Err("Backup path must not be empty".to_string());
+        return Err(CommandError::new(
+            ErrorCode::BackupPathEmpty,
+            "Backup path must not be empty",
+        ));
     }
 
     let dest = PathBuf::from(&path);
 
-    state
-        .storage
-        .backup(&dest)
-        .await
-        .map_err(|e| format!("Backup failed: {}", e))
+    state.storage.backup(&dest).await.map_err(backup_error)
 }
 
 /// Restore from backup file.
 #[tauri::command]
-pub async fn restore_data(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub async fn restore_data(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError> {
     if path.is_empty() {
-        return Err("Restore path must not be empty".to_string());
+        return Err(CommandError::new(
+            ErrorCode::RestorePathEmpty,
+            "Restore path must not be empty",
+        ));
     }
 
     let src = PathBuf::from(&path);
 
     if !src.exists() {
-        return Err(format!("Backup file does not exist: {}", path));
+        return Err(CommandError::new(
+            ErrorCode::RestoreFileNotFound,
+            format!("Backup file does not exist: {}", path),
+        )
+        .param("path", &path));
     }
 
     // Hold the dedup lock across the restore so no collection cycle can
     // deduplicate against a bloom filter that no longer matches the DB.
     let mut dedup = state.dedup.lock().await;
-    state
-        .storage
-        .restore(&src)
-        .await
-        .map_err(|e| format!("Restore failed: {}", e))?;
-    dedup
-        .reload()
-        .await
-        .map_err(|e| format!("Restore succeeded but reloading dedup cache failed: {}", e))
+    state.storage.restore(&src).await.map_err(restore_error)?;
+    dedup.reload().await.map_err(|e| {
+        CommandError::new(
+            ErrorCode::RestoreReloadFailed,
+            format!("Restore succeeded but reloading dedup cache failed: {}", e),
+        )
+    })
 }
 
 /// Check GitHub API for available updates (compare semver).
 #[tauri::command]
-pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
+pub async fn check_for_updates() -> Result<Option<UpdateInfo>, CommandError> {
     let current_version = env!("CARGO_PKG_VERSION");
 
     // Fail fast if our own version is not valid semver
     semver::Version::parse(current_version).map_err(|e| {
-        format!(
-            "Failed to parse current version '{}': {}",
-            current_version, e
+        CommandError::new(
+            ErrorCode::Internal,
+            format!(
+                "Failed to parse current version '{}': {}",
+                current_version, e
+            ),
         )
     })?;
 
-    // Every outbound request goes through the network guard: only
-    // api.github.com is reachable, provider APIs are blocked outright.
+    // Every outbound request goes through the network guard: only GitHub
+    // hosts are reachable, provider APIs are blocked outright.
     let guard = crate::network::NetworkGuard::new();
     if !guard.is_allowed(RELEASES_URL) {
         let audit = guard.audit_blocked_request(RELEASES_URL);
         log::warn!("Update check blocked by network guard: {:?}", audit);
-        return Err("Update check blocked by network policy".to_string());
+        return Err(CommandError::new(
+            ErrorCode::UpdateBlocked,
+            "Update check blocked by network policy",
+        ));
     }
 
     // Query GitHub releases API
@@ -748,14 +778,24 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .user_agent("ai-usage-widget")
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| {
+            CommandError::new(
+                ErrorCode::UpdateCheckFailed,
+                format!("Failed to create HTTP client: {}", e),
+            )
+        })?;
 
     let response = client
         .get(RELEASES_URL)
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|e| format!("Failed to check for updates: {}", e))?;
+        .map_err(|e| {
+            CommandError::new(
+                ErrorCode::UpdateCheckFailed,
+                format!("Failed to check for updates: {}", e),
+            )
+        })?;
 
     if !response.status().is_success() {
         // No update info available (e.g., 404, rate limited). Log the status
@@ -769,10 +809,12 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         return Ok(None);
     }
 
-    let release: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release response: {}", e))?;
+    let release: serde_json::Value = response.json().await.map_err(|e| {
+        CommandError::new(
+            ErrorCode::UpdateCheckFailed,
+            format!("Failed to parse release response: {}", e),
+        )
+    })?;
 
     // Extract tag_name (e.g., "v0.2.0")
     let tag = release["tag_name"]
@@ -795,6 +837,102 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         }
         None => Ok(None),
     }
+}
+
+// ─── In-app Updater ─────────────────────────────────────────────────────────────
+
+/// Signed update manifest read by `tauri-plugin-updater`. Must equal
+/// `plugins.updater.endpoints[0]` in tauri.conf.json (checked by a test).
+pub const UPDATER_ENDPOINT: &str =
+    "https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/latest/download/latest.json";
+
+/// Progress of `install_update`, streamed to the UI over an IPC channel.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
+pub enum UpdateProgress {
+    Started { content_length: Option<u64> },
+    Progress { chunk_length: usize },
+    Finished,
+}
+
+/// Download, verify and install the latest signed release, then restart.
+///
+/// Detection stays with `check_for_updates`; this runs only on an explicit
+/// "Update now" click, because the plugin needs its own check to obtain the
+/// signed `Update`. The plugin verifies the signature against the pubkey in
+/// tauri.conf.json before running the installer.
+#[cfg(not(test))]
+#[tauri::command]
+pub async fn install_update(
+    app: tauri::AppHandle,
+    on_event: tauri::ipc::Channel<UpdateProgress>,
+) -> Result<(), CommandError> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    // Same guard as check_for_updates. The asset URL in latest.json redirects
+    // to *.githubusercontent.com; that redirect is followed inside the
+    // plugin's own HTTP client, not by a request made here.
+    let guard = crate::network::NetworkGuard::new();
+    if !guard.is_allowed(UPDATER_ENDPOINT) {
+        let audit = guard.audit_blocked_request(UPDATER_ENDPOINT);
+        log::warn!("Update install blocked by network guard: {:?}", audit);
+        return Err(CommandError::new(
+            ErrorCode::UpdateBlocked,
+            "Update download blocked by network policy",
+        ));
+    }
+
+    let check_failed = |e: tauri_plugin_updater::Error| {
+        CommandError::new(
+            ErrorCode::UpdateCheckFailed,
+            format!("Failed to check for updates: {}", e),
+        )
+    };
+    let update = app
+        .updater()
+        .map_err(check_failed)?
+        .check()
+        .await
+        .map_err(check_failed)?
+        .ok_or_else(|| {
+            CommandError::new(
+                ErrorCode::UpdateNotAvailable,
+                "No signed update is available from the update endpoint",
+            )
+        })?;
+
+    log::info!(
+        "Installing update {} -> {}",
+        update.current_version,
+        update.version
+    );
+
+    let mut started = false;
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                if !started {
+                    started = true;
+                    let _ = on_event.send(UpdateProgress::Started { content_length });
+                }
+                let _ = on_event.send(UpdateProgress::Progress { chunk_length });
+            },
+            || {
+                let _ = on_event.send(UpdateProgress::Finished);
+            },
+        )
+        .await
+        .map_err(|e| {
+            CommandError::new(
+                ErrorCode::UpdateInstallFailed,
+                format!("Failed to download or install the update: {}", e),
+            )
+        })?;
+
+    log::info!("Update {} installed, restarting", update.version);
+    // On Windows the passive NSIS installer usually exits this process before
+    // we get here and relaunches the app itself; restart() is the fallback.
+    app.restart()
 }
 
 // ─── Testable Helper Functions ──────────────────────────────────────────────────
@@ -831,7 +969,45 @@ fn safe_download_url(html_url: &str) -> String {
 
 #[cfg(test)]
 mod update_url_tests {
-    use super::{safe_download_url, RELEASES_PAGE_FALLBACK, RELEASES_URL, RELEASE_PAGE_PREFIX};
+    use super::{
+        safe_download_url, UpdateProgress, RELEASES_PAGE_FALLBACK, RELEASES_URL,
+        RELEASE_PAGE_PREFIX, UPDATER_ENDPOINT,
+    };
+
+    #[test]
+    fn updater_endpoint_is_allowed_by_network_guard() {
+        assert!(crate::network::NetworkGuard::new().is_allowed(UPDATER_ENDPOINT));
+    }
+
+    #[test]
+    fn tauri_conf_updater_matches_command() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater = &conf["plugins"]["updater"];
+        assert_eq!(updater["endpoints"][0], UPDATER_ENDPOINT);
+        assert!(!updater["pubkey"].as_str().unwrap_or("").is_empty());
+        assert_eq!(updater["windows"]["installMode"], "passive");
+        assert_eq!(conf["bundle"]["createUpdaterArtifacts"], true);
+    }
+
+    #[test]
+    fn update_progress_serialization() {
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Started {
+                content_length: Some(123)
+            })
+            .unwrap(),
+            serde_json::json!({"event": "started", "data": {"content_length": 123}})
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Progress { chunk_length: 10 }).unwrap(),
+            serde_json::json!({"event": "progress", "data": {"chunk_length": 10}})
+        );
+        assert_eq!(
+            serde_json::to_value(UpdateProgress::Finished).unwrap(),
+            serde_json::json!({"event": "finished"})
+        );
+    }
 
     #[test]
     fn releases_url_points_at_project_repo() {

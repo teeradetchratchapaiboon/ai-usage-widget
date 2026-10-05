@@ -19,6 +19,7 @@ import {
   triggerCollection,
 } from "../lib/ipc";
 import type { AppSettings } from "../lib/ipc";
+import { formatError } from "../lib/commandError";
 
 export function Settings() {
   const { t, i18n } = useTranslation();
@@ -28,7 +29,9 @@ export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [backupPath, setBackupPath] = useState("");
   const [restorePath, setRestorePath] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // Raw rejection value, formatted at render time so a language switch
+  // re-translates an error already on screen.
+  const [error, setError] = useState<unknown>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
   const [collectResult, setCollectResult] = useState<string | null>(null);
@@ -55,7 +58,7 @@ export function Settings() {
       setSettings(current);
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(e);
     }
   }
 
@@ -72,7 +75,7 @@ export function Settings() {
       );
       setError(result.errors.length > 0 ? result.errors.join("; ") : null);
     } catch (e) {
-      setError(String(e));
+      setError(e);
     } finally {
       setIsCollecting(false);
     }
@@ -88,7 +91,7 @@ export function Settings() {
       setError(null);
       return true;
     } catch (e) {
-      setError(String(e));
+      setError(e);
       return false;
     } finally {
       setIsSaving(false);
@@ -107,7 +110,7 @@ export function Settings() {
       await backupData(backupPath.trim());
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(e);
     }
   }
 
@@ -119,15 +122,17 @@ export function Settings() {
       // Reload settings after restore
       await loadSettings();
     } catch (e) {
-      setError(String(e));
+      setError(e);
     }
   }
+
+  const errorText = error == null ? null : formatError(error, t);
 
   if (!settings) {
     return (
       <div className="p-4 text-white/70 text-sm">
-        {error ? (
-          <span className="text-red-400">{error}</span>
+        {errorText ? (
+          <span className="text-red-400">{errorText}</span>
         ) : (
           <span>{t("status.loading")}</span>
         )}
@@ -140,9 +145,9 @@ export function Settings() {
       <h2 className="text-base font-semibold">{t("tray.settings")}</h2>
 
       {/* Error display */}
-      {error && (
+      {errorText && (
         <div className="bg-red-500/20 border border-red-400/30 rounded px-3 py-2 text-xs text-red-300">
-          {error}
+          {errorText}
         </div>
       )}
 

@@ -136,6 +136,31 @@ describe("Settings", () => {
     expect((warning as HTMLInputElement).value).toBe("60");
   });
 
+  it("shows a backend error code as localized text", async () => {
+    setupMocks(() =>
+      Promise.reject({
+        code: "THRESHOLD_ORDER",
+        message: "Settings validation failed: invalid notification threshold: ...",
+        params: { warning: "95", critical: "90" },
+      }),
+    );
+    await renderSettings();
+    const warning = screen.getByRole("slider", { name: /Warning/ });
+
+    fireEvent.change(warning, { target: { value: "95" } });
+    fireEvent.pointerUp(warning);
+
+    const enText = "The warning threshold (95%) must be below the critical threshold (90%)";
+    // Generous timeout: the default 1s was flaky on slower CI runners
+    expect(await screen.findByText(enText, {}, { timeout: 5000 })).toBeTruthy();
+
+    // Stored raw, so switching language re-translates the shown error
+    await act(async () => {
+      await i18n.changeLanguage("th");
+    });
+    expect(screen.getByText("เกณฑ์เตือน (95%) ต้องต่ำกว่าเกณฑ์วิกฤต (90%)")).toBeTruthy();
+  });
+
   it("shows the saved threshold values instead of fixed defaults", async () => {
     await renderSettings();
 

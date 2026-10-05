@@ -104,15 +104,50 @@
     "available": "มีอัปเดตใหม่",
     "currentVersion": "เวอร์ชันปัจจุบัน",
     "latestVersion": "เวอร์ชันล่าสุด",
-    "download": "ดาวน์โหลด",
+    "download": "หน้าดาวน์โหลด",
     "releaseNotes": "รายละเอียดการอัปเดต",
-    "dismiss": "ปิด"
+    "dismiss": "ปิด",
+    "installNow": "อัปเดตทันที",
+    "downloading": "กำลังดาวน์โหลด… {{pct}}%",
+    "downloadingUnknown": "กำลังดาวน์โหลด…",
+    "installing": "กำลังติดตั้ง โปรแกรมจะเปิดใหม่…",
+    "failed": "อัปเดตไม่สำเร็จ",
+    "progressLabel": "ความคืบหน้าการดาวน์โหลดอัปเดต"
   },
   "errors": {
     "generic": "เกิดข้อผิดพลาด",
     "connectionFailed": "ไม่สามารถเชื่อมต่อได้",
     "dataLoadFailed": "ไม่สามารถโหลดข้อมูลได้",
-    "saveFailed": "ไม่สามารถบันทึกได้"
+    "saveFailed": "ไม่สามารถบันทึกได้",
+    "code": {
+      "INVALID_LOCALE": "ไม่รองรับภาษา: {{value}}",
+      "INVALID_INTERVAL": "ช่วงเวลาเก็บข้อมูลต้องอยู่ระหว่าง {{min}} ถึง {{max}} วินาที (ได้รับ {{value}})",
+      "INVALID_RETENTION": "ระยะเวลาเก็บข้อมูลต้องอยู่ระหว่าง {{min}} ถึง {{max}} วัน (ได้รับ {{value}})",
+      "THRESHOLD_OUT_OF_RANGE": "เกณฑ์การแจ้งเตือนต้องอยู่ระหว่าง 0 ถึง 100% (ได้รับ {{value}})",
+      "THRESHOLD_ORDER": "เกณฑ์เตือน ({{warning}}%) ต้องต่ำกว่าเกณฑ์วิกฤต ({{critical}}%)",
+      "INVALID_TIME_RANGE": "เวลาเริ่มต้องอยู่ก่อนเวลาสิ้นสุด",
+      "TIME_RANGE_TOO_LARGE": "ช่วงเวลา ({{days}} วัน) เกินสูงสุด {{max}} วัน",
+      "FUTURE_DATE": "เวลาสิ้นสุดต้องไม่อยู่ในอนาคต",
+      "INVALID_PROVIDER_ID": "รหัสผู้ให้บริการไม่ถูกต้อง",
+      "SETTINGS_SAVE_FAILED": "บันทึกการตั้งค่าไม่สำเร็จ",
+      "AUTOSTART_FAILED": "เปลี่ยนการเปิดโปรแกรมอัตโนมัติไม่สำเร็จ",
+      "WINDOW_SETTING_FAILED": "ใช้การตั้งค่าหน้าต่างไม่สำเร็จ",
+      "BACKUP_PATH_EMPTY": "กรุณาระบุตำแหน่งไฟล์สำรองข้อมูล",
+      "BACKUP_FAILED": "สำรองข้อมูลไม่สำเร็จ",
+      "RESTORE_PATH_EMPTY": "กรุณาระบุไฟล์สำรองข้อมูลที่จะกู้คืน",
+      "RESTORE_FILE_NOT_FOUND": "ไม่พบไฟล์สำรองข้อมูล: {{path}}",
+      "RESTORE_FROM_LIVE_DATABASE": "ไม่สามารถกู้คืนจากฐานข้อมูลที่ใช้งานอยู่หรือไฟล์สำรองความปลอดภัยได้",
+      "RESTORE_INVALID_BACKUP": "ไฟล์นี้ไม่ใช่ไฟล์สำรองข้อมูลของ AI Usage Widget ที่ถูกต้อง",
+      "RESTORE_INTEGRITY_FAILED": "ไฟล์สำรองข้อมูลเสียหาย (ตรวจสอบความสมบูรณ์ไม่ผ่าน)",
+      "RESTORE_CHECKSUM_MISMATCH": "ไฟล์สำรองข้อมูลถูกแก้ไขหลังจากสร้าง (checksum ไม่ตรงกัน)",
+      "RESTORE_FAILED": "กู้คืนข้อมูลไม่สำเร็จ",
+      "RESTORE_RELOAD_FAILED": "กู้คืนข้อมูลแล้ว แต่โหลดแคชใหม่ไม่สำเร็จ กรุณาเปิดโปรแกรมใหม่",
+      "UPDATE_BLOCKED": "การตรวจสอบอัปเดตถูกบล็อกโดยนโยบายเครือข่าย",
+      "UPDATE_CHECK_FAILED": "ตรวจสอบอัปเดตไม่สำเร็จ",
+      "UPDATE_NOT_AVAILABLE": "การอัปเดตอัตโนมัติยังไม่รองรับสำหรับเวอร์ชันนี้ กรุณาใช้หน้าดาวน์โหลด",
+      "UPDATE_INSTALL_FAILED": "ดาวน์โหลดหรือติดตั้งอัปเดตไม่สำเร็จ",
+      "INTERNAL": "เกิดข้อผิดพลาดที่ไม่คาดคิด"
+    }
   },
   "window": {
     "maximize": "ขยาย / ย่อกลับ"

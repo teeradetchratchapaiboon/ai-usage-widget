@@ -37,8 +37,24 @@ pub enum StorageError {
     #[error("restore failed: {0}")]
     RestoreFailed(String),
 
+    /// A restore refused because of the backup file itself. Display matches
+    /// `RestoreFailed`; the kind lets the command layer pick an error code
+    /// without matching on message text.
+    #[error("restore failed: {1}")]
+    RestoreRejected(RestoreRejection, String),
+
     #[error("checksum mismatch: expected {0}, got {1}")]
     ChecksumMismatch(String, String),
+}
+
+/// Why `Storage::restore` rejected a backup file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreRejection {
+    SourceMissing,
+    LiveDatabase,
+    NotADatabase,
+    IntegrityCheckFailed,
+    MissingTable,
 }
 
 /// Errors related to input validation (IPC commands).
@@ -53,7 +69,7 @@ pub enum ValidationError {
     #[error("future date not allowed: {0}")]
     FutureDate(String),
 
-    #[error("invalid locale: {0}")]
+    #[error("invalid locale: '{0}' is not supported, allowed values: [\"th\", \"en\"]")]
     InvalidLocale(String),
 
     #[error("invalid interval: {0}s (must be between {1}s and {2}s)")]
@@ -65,8 +81,13 @@ pub enum ValidationError {
     #[error("invalid provider id: {0}")]
     InvalidProviderId(String),
 
-    #[error("invalid notification threshold: {0}")]
-    InvalidThreshold(String),
+    #[error(
+        "invalid notification threshold: {label} threshold must be between 0 and 100, got {value}"
+    )]
+    ThresholdOutOfRange { label: String, value: f64 },
+
+    #[error("invalid notification threshold: warning threshold ({warning}) must be below critical threshold ({critical})")]
+    ThresholdOrder { warning: f64, critical: f64 },
 }
 
 /// Errors that occur while parsing provider data files.

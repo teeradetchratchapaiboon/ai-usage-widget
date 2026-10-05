@@ -53,11 +53,11 @@ Windows 11 มี Microsoft Edge WebView2 Runtime มาให้แล้ว �
 
 ### ปุ่มบนวิดเจ็ต
 
-| ปุ่ม | การทำงาน |
-| --- | --- |
-| `⌃` / `⌄` | พับหรือกางวิดเจ็ต |
-| `⤓` | ซ่อนวิดเจ็ตลง System Tray โดยโปรแกรมยังทำงานอยู่ |
-| `⛶` | เปิด Dashboard สำหรับดูโควตาปัจจุบันและกราฟย้อนหลัง |
+| ปุ่ม      | การทำงาน                                            |
+| --------- | --------------------------------------------------- |
+| `⌃` / `⌄` | พับหรือกางวิดเจ็ต                                   |
+| `⤓`       | ซ่อนวิดเจ็ตลง System Tray โดยโปรแกรมยังทำงานอยู่    |
+| `⛶`       | เปิด Dashboard สำหรับดูโควตาปัจจุบันและกราฟย้อนหลัง |
 
 ### เมนู System Tray
 
@@ -85,11 +85,11 @@ Windows 11 มี Microsoft Edge WebView2 Runtime มาให้แล้ว �
 
 AI Usage Widget อ่านค่าที่ Codex/Claude เพิ่งเขียนลงดิสก์ จึงไม่ใช่ตัวเลข real-time จาก API
 
-| สถานะ | ความหมาย |
-| --- | --- |
-| สด | ข้อมูลมีอายุไม่เกิน 15 นาที |
-| ล่าสุด | ข้อมูลมีอายุ 15 นาทีถึง 6 ชั่วโมง และจะแสดงอายุไว้ด้วย |
-| ข้อมูลเก่า | ข้อมูลเกิน 6 ชั่วโมง ค่าจะจางลงและไม่ใช้แจ้งเตือน |
+| สถานะ      | ความหมาย                                                 |
+| ---------- | -------------------------------------------------------- |
+| สด         | ข้อมูลมีอายุไม่เกิน 15 นาที                              |
+| ล่าสุด     | ข้อมูลมีอายุ 15 นาทีถึง 6 ชั่วโมง และจะแสดงอายุไว้ด้วย   |
+| ข้อมูลเก่า | ข้อมูลเกิน 6 ชั่วโมง ค่าจะจางลงและไม่ใช้แจ้งเตือน        |
 | รอบหมดแล้ว | เลยเวลารีเซ็ตของรอบเดิม โปรแกรมจะแสดง `—` จนพบข้อมูลใหม่ |
 
 เวลาที่มีเครื่องหมาย `~` เป็นเวลาประมาณจากประวัติ ส่วนเวลาที่ไม่มีเครื่องหมายนี้มาจากข้อมูลที่ provider รายงาน
@@ -115,7 +115,7 @@ AI Usage Widget อ่านค่าที่ Codex/Claude เพิ่งเ�
 - ไม่เรียก OpenAI/Anthropic API และไม่สร้าง AI inference request
 - เก็บประวัติไว้ในฐานข้อมูล SQLite บนเครื่องของผู้ใช้
 - hash project path, session ID และ organization ID ก่อนบันทึก
-- เชื่อมต่อ GitHub API เพื่อเช็กเวอร์ชันใหม่เท่านั้น
+- เชื่อมต่อ GitHub เพื่อเช็กเวอร์ชันใหม่ และดาวน์โหลดไฟล์อัปเดตเมื่อผู้ใช้กด **อัปเดตทันที** เท่านั้น
 
 ข้อมูลต้นทางที่รองรับ:
 
@@ -143,6 +143,12 @@ AI Usage Widget อ่านค่าที่ Codex/Claude เพิ่งเ�
 - เปิด Claude Desktop และใช้งานอย่างน้อยหนึ่งครั้ง
 - รุ่นปัจจุบันรองรับตำแหน่งข้อมูลของ Claude ที่ติดตั้งจาก Microsoft Store
 - หากติดตั้ง Claude ด้วยวิธีอื่น ตำแหน่งข้อมูลอาจต่างออกไปและยังต้องตั้งค่าเพิ่มเติม
+
+### อัปเดตอัตโนมัติ
+
+ตั้งแต่เวอร์ชัน 0.2.0 เมื่อมีเวอร์ชันใหม่ Dashboard จะแสดงแถบแจ้งเตือนพร้อมปุ่ม **อัปเดตทันที** โปรแกรมจะดาวน์โหลด ตรวจลายเซ็นของไฟล์ติดตั้ง ติดตั้ง แล้วเปิดตัวเองใหม่ หากอัปเดตอัตโนมัติไม่สำเร็จ ให้กดปุ่ม **หน้าดาวน์โหลด** เพื่อดาวน์โหลดไฟล์ติดตั้งจากหน้า Release แทน
+
+ผู้ที่ใช้เวอร์ชัน 0.1.0 ต้องติดตั้ง 0.2.0 ด้วยตนเองหนึ่งครั้งก่อน เพราะ 0.1.0 ยังไม่มีระบบอัปเดตอัตโนมัติ
 
 ### Windows 10 เปิดโปรแกรมไม่ได้
 
@@ -174,10 +180,43 @@ cd ai-usage-widget
 npm ci
 npm test
 npx tsc --noEmit
-npm run tauri build -- --bundles nsis
+npm run tauri:build:unsigned
 ```
 
 หาก source path มีช่องว่างและ Rust build มีปัญหา ให้กำหนด `CARGO_TARGET_DIR` เป็น path ที่ไม่มีช่องว่างก่อน build
+
+### Build แบบไม่เซ็น (สำหรับทดสอบในเครื่อง)
+
+`tauri.conf.json` เปิด `bundle.createUpdaterArtifacts` ไว้ ทำให้ `npm run tauri build` ต้องใช้ private key สำหรับเซ็นไฟล์อัปเดต หากไม่มี key คำสั่งจะสร้างไฟล์ติดตั้งเสร็จ แต่จบด้วย error:
+
+```text
+A public key has been found, but no private key. Make sure to set `TAURI_SIGNING_PRIVATE_KEY` environment variable.
+```
+
+สำหรับ build ในเครื่องโดยไม่มี key ให้ใช้:
+
+```powershell
+npm run tauri:build:unsigned
+```
+
+คำสั่งนี้ใช้ `src-tauri/tauri.unsigned.conf.json` เพื่อปิด `createUpdaterArtifacts` จึงได้ไฟล์ติดตั้ง NSIS ใน `src-tauri/target/release/bundle/nsis/` โดยไม่มีไฟล์ `.sig` ไฟล์นี้ติดตั้งใช้งานได้ตามปกติ แต่ใช้เป็นไฟล์อัปเดตอัตโนมัติไม่ได้
+
+### Build แบบเซ็น (ผู้ดูแลที่มี key)
+
+Tauri รับ path ของไฟล์ key ได้ จึงไม่ต้องวางเนื้อหา key ลงใน shell history:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = "$HOME\.tauri\ai-usage-widget.key"
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Read-Host "Key password" -MaskInput
+npm run tauri build -- --bundles nsis
+Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY*
+```
+
+`Read-Host -MaskInput` ต้องใช้ PowerShell 7 ขึ้นไป ห้าม commit private key หรือรหัสผ่านลง repository และให้ลบตัวแปรทั้งสองออกหลัง build เสร็จ
+
+### Release
+
+เมื่อ push tag `vX.Y.Z` GitHub Actions จะตรวจว่าเวอร์ชันใน `package.json`, `src-tauri/tauri.conf.json` และ `src-tauri/Cargo.toml` ตรงกับ tag แล้ว build และเซ็นด้วย repository secrets `TAURI_SIGNING_PRIVATE_KEY` และ `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` จากนั้นอัปโหลดไฟล์ติดตั้ง, ไฟล์ `.sig` และ `latest.json` ที่ระบบอัปเดตอัตโนมัติใช้ ขึ้น GitHub Release
 
 </details>
 

@@ -5,7 +5,7 @@
  * Types mirror the Rust serialization output (snake_case field names).
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Freshness } from "./freshness";
 
 export type { Freshness };
@@ -161,9 +161,33 @@ export async function restoreData(path: string): Promise<void> {
   return invoke<void>("restore_data", { path });
 }
 
-/** Check GitHub API for available updates */
+/**
+ * Check GitHub API for available updates.
+ *
+ * Rejects with a `CommandError` (see ./commandError) on failure.
+ */
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_for_updates");
+}
+
+/** Progress of `installUpdate`; mirrors Rust `commands::UpdateProgress`. */
+export type UpdateProgress =
+  | { event: "started"; data: { content_length: number | null } }
+  | { event: "progress"; data: { chunk_length: number } }
+  | { event: "finished" };
+
+/**
+ * Download and install the latest signed release, then restart the app.
+ *
+ * Progress arrives on `onProgress`. Rejects with a `CommandError` (e.g.
+ * `UPDATE_NOT_AVAILABLE`) when the update cannot be installed.
+ */
+export async function installUpdate(
+  onProgress: (e: UpdateProgress) => void,
+): Promise<void> {
+  const channel = new Channel<UpdateProgress>();
+  channel.onmessage = onProgress;
+  return invoke<void>("install_update", { onEvent: channel });
 }
 
 /** Open (or focus) the dashboard window on the given tab. */

@@ -14,6 +14,56 @@ pub enum NotificationLevel {
     Critical,
 }
 
+/// Toast title for a notification in the configured locale.
+///
+/// Same rule as the tray menu (`tray::labels_for`): `"en"` is English,
+/// anything else falls back to Thai, the default locale.
+pub fn notification_title(level: &NotificationLevel, locale: &str) -> &'static str {
+    match (locale == "en", level) {
+        (true, NotificationLevel::Critical) => "AI Usage Widget — Critical",
+        (true, NotificationLevel::Warning) => "AI Usage Widget — Warning",
+        (false, NotificationLevel::Critical) => "AI Usage Widget — วิกฤต",
+        (false, NotificationLevel::Warning) => "AI Usage Widget — คำเตือน",
+    }
+}
+
+#[cfg(test)]
+mod notification_title_tests {
+    use super::*;
+
+    #[test]
+    fn english_titles() {
+        assert_eq!(
+            notification_title(&NotificationLevel::Critical, "en"),
+            "AI Usage Widget — Critical"
+        );
+        assert_eq!(
+            notification_title(&NotificationLevel::Warning, "en"),
+            "AI Usage Widget — Warning"
+        );
+    }
+
+    #[test]
+    fn thai_titles() {
+        assert_eq!(
+            notification_title(&NotificationLevel::Critical, "th"),
+            "AI Usage Widget — วิกฤต"
+        );
+        assert_eq!(
+            notification_title(&NotificationLevel::Warning, "th"),
+            "AI Usage Widget — คำเตือน"
+        );
+    }
+
+    #[test]
+    fn unknown_locale_falls_back_to_thai() {
+        assert_eq!(
+            notification_title(&NotificationLevel::Warning, "fr"),
+            "AI Usage Widget — คำเตือน"
+        );
+    }
+}
+
 /// Which metered window a reading belongs to.
 ///
 /// The windows run out independently and the wait to recover differs by days,
