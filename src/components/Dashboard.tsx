@@ -325,8 +325,11 @@ function computeTokenTypeSummary(history: UsageRecord[]): TokenTypeSummary {
 
 export function Dashboard() {
   const { t } = useTranslation();
-  const { history, historyLoading, error, fetchHistory, fetchProviderStatus } =
-    useAppStore();
+  const history = useAppStore((s) => s.history);
+  const historyLoading = useAppStore((s) => s.historyLoading);
+  const error = useAppStore((s) => s.error);
+  const fetchHistory = useAppStore((s) => s.fetchHistory);
+  const fetchProviderStatus = useAppStore((s) => s.fetchProviderStatus);
 
   const [timeRange, setTimeRange] = useState<TimeRange>("week");
   const [granularity, setGranularity] = useState<Granularity>("daily");

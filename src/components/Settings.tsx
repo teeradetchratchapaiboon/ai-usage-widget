@@ -8,7 +8,7 @@
  * Validates: Requirements 8.2, 9.2, 10.1, 10.2
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import {
@@ -22,7 +22,8 @@ import type { AppSettings } from "../lib/ipc";
 
 export function Settings() {
   const { t, i18n } = useTranslation();
-  const { locale, setLocale } = useAppStore();
+  const locale = useAppStore((s) => s.locale);
+  const setLocale = useAppStore((s) => s.setLocale);
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [backupPath, setBackupPath] = useState("");
@@ -31,6 +32,17 @@ export function Settings() {
   const [isSaving, setIsSaving] = useState(false);
   const [isCollecting, setIsCollecting] = useState(false);
   const [collectResult, setCollectResult] = useState<string | null>(null);
+
+  // Ids tie each label to its control; declared before the early return so
+  // the hook order never changes.
+  const intervalId = useId();
+  const warningLabelId = useId();
+  const criticalLabelId = useId();
+  const autostartId = useId();
+  const alwaysOnTopId = useId();
+  const clickThroughId = useId();
+  const backupId = useId();
+  const restoreId = useId();
 
   // Load settings on mount
   useEffect(() => {
@@ -53,7 +65,10 @@ export function Settings() {
     try {
       const result = await triggerCollection();
       setCollectResult(
-        `+${result.events_collected} (${result.providers_collected} provider)`,
+        t("settings.collectResult", {
+          events: result.events_collected,
+          providers: result.providers_collected,
+        }),
       );
       setError(result.errors.length > 0 ? result.errors.join("; ") : null);
     } catch (e) {
@@ -63,15 +78,18 @@ export function Settings() {
     }
   }
 
-  async function handleUpdate(patch: Partial<AppSettings>) {
-    if (!settings) return;
+  /** Persist a patch; resolves to whether the backend accepted it. */
+  async function handleUpdate(patch: Partial<AppSettings>): Promise<boolean> {
+    if (!settings) return false;
     setIsSaving(true);
     try {
       await updateSettings(patch);
-      setSettings({ ...settings, ...patch });
+      setSettings((prev) => prev && { ...prev, ...patch });
       setError(null);
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -146,30 +164,26 @@ export function Settings() {
       </SettingRow>
 
       {/* Collection Interval */}
-      <SettingRow label={t("settings.collectionInterval")}>
-        <div className="flex items-center gap-2">
-          <input
-            type="range"
-            min={10}
-            max={3600}
-            step={10}
-            value={settings.collection_interval_secs}
-            onChange={(e) =>
-              handleUpdate({ collection_interval_secs: Number(e.target.value) })
-            }
-            className="flex-1 accent-blue-400"
-            disabled={isSaving}
-          />
-          <span className="text-xs text-white/60 w-12 text-right">
-            {settings.collection_interval_secs}s
-          </span>
-        </div>
+      <SettingRow label={t("settings.collectionInterval")} controlId={intervalId}>
+        <RangeSetting
+          id={intervalId}
+          min={10}
+          max={3600}
+          step={10}
+          value={settings.collection_interval_secs}
+          accentClass="accent-blue-400"
+          valueClass="w-12"
+          format={(v) => `${v}s`}
+          onCommit={(v) => handleUpdate({ collection_interval_secs: v })}
+        />
       </SettingRow>
 
       {/* Language */}
       <SettingRow label={t("settings.language")}>
         <div className="flex gap-2">
           <button
+            type="button"
+            aria-pressed={locale === "th"}
             onClick={() => handleLocaleChange("th")}
             className={`px-3 py-1 rounded text-xs transition-colors ${
               locale === "th"
@@ -180,6 +194,8 @@ export function Settings() {
             ไทย
           </button>
           <button
+            type="button"
+            aria-pressed={locale === "en"}
             onClick={() => handleLocaleChange("en")}
             className={`px-3 py-1 rounded text-xs transition-colors ${
               locale === "en"
@@ -196,47 +212,42 @@ export function Settings() {
       <SettingRow label={t("settings.notifications")}>
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-yellow-300 w-12">⚠ 75%</span>
-            <input
-              type="range"
+            <span id={warningLabelId} className="text-[10px] text-yellow-300 w-12">
+              ⚠ {t("settings.warningThreshold")}
+            </span>
+            <RangeSetting
+              labelledBy={warningLabelId}
               min={1}
               max={100}
               value={settings.notification_warning_pct}
-              onChange={(e) =>
-                handleUpdate({ notification_warning_pct: Number(e.target.value) })
-              }
-              className="flex-1 accent-yellow-400"
-              disabled={isSaving}
+              accentClass="accent-yellow-400"
+              valueClass="w-10"
+              format={(v) => `${v}%`}
+              onCommit={(v) => handleUpdate({ notification_warning_pct: v })}
             />
-            <span className="text-xs text-white/60 w-10 text-right">
-              {settings.notification_warning_pct}%
-            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-red-300 w-12">🚨 90%</span>
-            <input
-              type="range"
+            <span id={criticalLabelId} className="text-[10px] text-red-300 w-12">
+              🚨 {t("settings.criticalThreshold")}
+            </span>
+            <RangeSetting
+              labelledBy={criticalLabelId}
               min={1}
               max={100}
               value={settings.notification_critical_pct}
-              onChange={(e) =>
-                handleUpdate({
-                  notification_critical_pct: Number(e.target.value),
-                })
-              }
-              className="flex-1 accent-red-400"
-              disabled={isSaving}
+              accentClass="accent-red-400"
+              valueClass="w-10"
+              format={(v) => `${v}%`}
+              onCommit={(v) => handleUpdate({ notification_critical_pct: v })}
             />
-            <span className="text-xs text-white/60 w-10 text-right">
-              {settings.notification_critical_pct}%
-            </span>
           </div>
         </div>
       </SettingRow>
 
       {/* Autostart */}
-      <SettingRow label={t("settings.autostart")}>
+      <SettingRow label={t("settings.autostart")} controlId={autostartId}>
         <ToggleSwitch
+          id={autostartId}
           checked={settings.autostart}
           onChange={(v) => handleUpdate({ autostart: v })}
           disabled={isSaving}
@@ -244,8 +255,9 @@ export function Settings() {
       </SettingRow>
 
       {/* Always on Top */}
-      <SettingRow label={t("settings.alwaysOnTop")}>
+      <SettingRow label={t("settings.alwaysOnTop")} controlId={alwaysOnTopId}>
         <ToggleSwitch
+          id={alwaysOnTopId}
           checked={settings.always_on_top}
           onChange={(v) => handleUpdate({ always_on_top: v })}
           disabled={isSaving}
@@ -253,8 +265,9 @@ export function Settings() {
       </SettingRow>
 
       {/* Click-through */}
-      <SettingRow label={t("settings.clickThrough")}>
+      <SettingRow label={t("settings.clickThrough")} controlId={clickThroughId}>
         <ToggleSwitch
+          id={clickThroughId}
           checked={settings.click_through}
           onChange={(v) => handleUpdate({ click_through: v })}
           disabled={isSaving}
@@ -262,13 +275,14 @@ export function Settings() {
       </SettingRow>
 
       {/* Backup */}
-      <SettingRow label={t("settings.backup")}>
+      <SettingRow label={t("settings.backup")} controlId={backupId}>
         <div className="flex gap-2">
           <input
+            id={backupId}
             type="text"
             value={backupPath}
             onChange={(e) => setBackupPath(e.target.value)}
-            placeholder="C:\backup\usage.db"
+            placeholder={t("settings.backupPathPlaceholder")}
             className="flex-1 bg-white/10 rounded px-2 py-1 text-xs text-white/80 placeholder:text-white/30 outline-none focus:ring-1 focus:ring-blue-400/50"
           />
           <button
@@ -282,13 +296,14 @@ export function Settings() {
       </SettingRow>
 
       {/* Restore */}
-      <SettingRow label={t("settings.restore")}>
+      <SettingRow label={t("settings.restore")} controlId={restoreId}>
         <div className="flex gap-2">
           <input
+            id={restoreId}
             type="text"
             value={restorePath}
             onChange={(e) => setRestorePath(e.target.value)}
-            placeholder="C:\backup\usage.db"
+            placeholder={t("settings.backupPathPlaceholder")}
             className="flex-1 bg-white/10 rounded px-2 py-1 text-xs text-white/80 placeholder:text-white/30 outline-none focus:ring-1 focus:ring-blue-400/50"
           />
           <button
@@ -315,27 +330,121 @@ export function Settings() {
 
 interface SettingRowProps {
   label: string;
+  /** Id of the row's single control; multi-control rows leave it unset. */
+  controlId?: string;
   children: React.ReactNode;
 }
 
-function SettingRow({ label, children }: SettingRowProps) {
+function SettingRow({ label, controlId, children }: SettingRowProps) {
+  const labelId = useId();
+  const labelClass = "text-xs font-medium text-white/70";
+
+  if (controlId) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label htmlFor={controlId} className={labelClass}>
+          {label}
+        </label>
+        {children}
+      </div>
+    );
+  }
+
+  // Several controls (or none) share this label, so it names the group
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-white/70">{label}</label>
+    <div className="flex flex-col gap-1" role="group" aria-labelledby={labelId}>
+      <span id={labelId} className={labelClass}>
+        {label}
+      </span>
       {children}
     </div>
   );
 }
 
+interface RangeSettingProps {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  id?: string;
+  labelledBy?: string;
+  accentClass: string;
+  valueClass: string;
+  format: (value: number) => string;
+  /** Persists the value; resolves to false when it was rejected. */
+  onCommit: (value: number) => Promise<boolean>;
+}
+
+/**
+ * A slider that only saves when the user lets go.
+ *
+ * Dragging updates a local draft; the value is committed on pointer release,
+ * key release, or blur. Saving on every step sent one IPC round-trip (and a
+ * config write) per pixel of drag.
+ */
+function RangeSetting({
+  value,
+  min,
+  max,
+  step,
+  id,
+  labelledBy,
+  accentClass,
+  valueClass,
+  format,
+  onCommit,
+}: RangeSettingProps) {
+  const [draft, setDraft] = useState(value);
+  // pointerup is followed by blur when focus moves on; one commit is enough
+  const inFlight = useRef<number | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  async function commit() {
+    if (draft === value || inFlight.current === draft) return;
+    inFlight.current = draft;
+    const accepted = await onCommit(draft);
+    inFlight.current = null;
+    if (!accepted) setDraft(value);
+  }
+
+  return (
+    <div className="flex flex-1 items-center gap-2">
+      <input
+        id={id}
+        aria-labelledby={labelledBy}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={draft}
+        onChange={(e) => setDraft(Number(e.target.value))}
+        onPointerUp={() => void commit()}
+        onKeyUp={() => void commit()}
+        onBlur={() => void commit()}
+        className={`flex-1 ${accentClass}`}
+      />
+      <span className={`text-xs text-white/60 text-right ${valueClass}`}>
+        {format(draft)}
+      </span>
+    </div>
+  );
+}
+
 interface ToggleSwitchProps {
+  id?: string;
   checked: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
 }
 
-function ToggleSwitch({ checked, onChange, disabled }: ToggleSwitchProps) {
+function ToggleSwitch({ id, checked, onChange, disabled }: ToggleSwitchProps) {
   return (
     <button
+      id={id}
+      type="button"
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
