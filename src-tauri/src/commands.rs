@@ -10,7 +10,6 @@ use crate::freshness::QuotaTiming;
 use crate::provider::ProviderSummary;
 use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::registry::ProviderRegistry;
-use crate::scheduler::CollectionScheduler;
 use crate::storage::StorageLayer;
 use crate::validation::{validate_settings, validate_time_range, PartialSettings};
 
@@ -22,7 +21,8 @@ use crate::validation::{validate_settings, validate_time_range, PartialSettings}
 pub struct AppState {
     pub storage: Arc<StorageLayer>,
     pub registry: Arc<ProviderRegistry>,
-    pub scheduler: Arc<Mutex<CollectionScheduler>>,
+    /// Lock-free control of the running collection loop (see `SchedulerHandle`).
+    pub scheduler: crate::scheduler::SchedulerHandle,
     pub config: Arc<Mutex<AppConfig>>,
     /// Path to the config file on disk for persisting changes.
     pub config_path: PathBuf,
@@ -492,6 +492,8 @@ pub async fn update_settings(
     // Validate inputs before applying
     validate_settings(&settings).map_err(|e| format!("Settings validation failed: {}", e))?;
 
+    // Invariant: nothing below awaits while this guard is held, so a slow or
+    // stuck subsystem cannot block every other user of the config.
     let mut config = state.config.lock().await;
 
     // Apply partial updates
@@ -530,11 +532,16 @@ pub async fn update_settings(
 
     // Notification thresholds take effect on the running scheduler
     if settings.notification_warning_pct.is_some() || settings.notification_critical_pct.is_some() {
-        let mut scheduler = state.scheduler.lock().await;
-        scheduler.set_notification_thresholds(
+        state.scheduler.set_notification_thresholds(
             config.notification_warning_pct,
             config.notification_critical_pct,
         );
+    }
+
+    // A new collection interval takes effect on the running loop right away
+    // (it restarts its pending wait), not only after the next app launch.
+    if let Some(interval) = settings.collection_interval_secs {
+        state.scheduler.set_interval(interval);
     }
 
     // Apply window settings to the running widget, not just to the file

@@ -168,7 +168,9 @@ pub fn run() {
         config.notification_warning_pct,
         config.notification_critical_pct,
     );
-    let scheduler = Arc::new(Mutex::new(scheduler));
+    // The collection task owns the scheduler outright; everything else talks
+    // to it through this handle, so no lock is ever held across its loop.
+    let scheduler_handle = scheduler.handle();
 
     // ─── 6. Create WindowManager ────────────────────────────────────────────
     let window_manager = WindowManager::new(config.window.clone(), &data_dir);
@@ -181,7 +183,7 @@ pub fn run() {
     let app_state = AppState {
         storage: storage.clone(),
         registry: registry.clone(),
-        scheduler: scheduler.clone(),
+        scheduler: scheduler_handle,
         config: Arc::new(Mutex::new(config.clone())),
         config_path: config_path.clone(),
         window_manager: window_manager.clone(),
@@ -327,7 +329,6 @@ pub fn run() {
             window::tauri_ops::start_fullscreen_detection_loop(app_handle_fs, wm_fullscreen);
 
             // Spawn collection loop
-            let scheduler_clone = scheduler.clone();
             let registry_clone = registry.clone();
             let dedup_clone = dedup.clone();
             let reconciliation_clone = reconciliation.clone();
@@ -355,7 +356,7 @@ pub fn run() {
             });
 
             tauri::async_runtime::spawn(async move {
-                let mut sched = scheduler_clone.lock().await;
+                let mut sched = scheduler;
                 sched
                     .run_with_notifier(
                         registry_clone,
