@@ -147,6 +147,23 @@ impl Default for ProviderRegistry {
     }
 }
 
+/// Runs `collect_all` on tokio's blocking pool.
+///
+/// Adapters do synchronous file/SQLite I/O and the Codex adapter retries with
+/// `std::thread::sleep`; running that directly in an async task would stall a
+/// tokio worker thread (and every other task scheduled on it).
+pub async fn collect_all_blocking(
+    registry: std::sync::Arc<ProviderRegistry>,
+) -> Vec<ProviderCollectionOutcome> {
+    match tokio::task::spawn_blocking(move || registry.collect_all()).await {
+        Ok(outcomes) => outcomes,
+        Err(e) => {
+            log::error!("Provider collection task failed: {}", e);
+            Vec::new()
+        }
+    }
+}
+
 #[cfg(test)]
 mod prop_tests_provider_isolation {
     use super::*;
@@ -276,6 +293,21 @@ mod prop_tests_provider_isolation {
         fn last_checkpoint(&self) -> Option<DateTime<Utc>> {
             None
         }
+    }
+
+    #[tokio::test]
+    async fn collect_all_blocking_matches_collect_all() {
+        let mut registry = ProviderRegistry::new();
+        registry.register(Box::new(SuccessProvider::new("ok".to_string(), 2)));
+        registry.register(Box::new(FailProvider::new(
+            "bad".to_string(),
+            "boom".to_string(),
+        )));
+        let registry = std::sync::Arc::new(registry);
+
+        let expected = registry.collect_all().len();
+        let outcomes = collect_all_blocking(registry.clone()).await;
+        assert_eq!(outcomes.len(), expected);
     }
 
     // --- Strategies ---

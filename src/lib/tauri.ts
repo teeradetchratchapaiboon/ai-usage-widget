@@ -57,13 +57,3 @@ export function onAppEvent<T>(
     unlisten?.();
   };
 }
-
-/** Toggle the current window between maximized and its previous size. */
-export async function toggleMaximizeWindow(): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    await getCurrentWindow().toggleMaximize();
-  } catch (err) {
-    console.warn("Failed to toggle maximize:", err);
-  }
-}
