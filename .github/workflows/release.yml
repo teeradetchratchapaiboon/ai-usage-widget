@@ -51,12 +51,16 @@ jobs:
         run: |
           $tauriVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
           $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $cargoVersion = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 
           if ($tauriVersion -ne $env:RELEASE_VERSION) {
             throw "src-tauri/tauri.conf.json version $tauriVersion does not match tag $env:RELEASE_VERSION"
           }
           if ($packageVersion -ne $env:RELEASE_VERSION) {
             throw "package.json version $packageVersion does not match tag $env:RELEASE_VERSION"
+          }
+          if ($cargoVersion -ne $env:RELEASE_VERSION) {
+            throw "src-tauri/Cargo.toml version $cargoVersion does not match tag $env:RELEASE_VERSION"
           }
 
       - run: npm ci
