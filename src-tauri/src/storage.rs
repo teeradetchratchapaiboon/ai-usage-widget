@@ -6,7 +6,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
-use crate::error::StorageError;
+use crate::error::{RestoreRejection, StorageError};
 use crate::query_types::{Granularity, ProviderUsageSummary, TimeRange, UsageRecord, UsageSummary};
 use crate::types::ReconciledEvent;
 
@@ -681,10 +681,10 @@ impl StorageLayer {
     pub async fn restore(&self, src: &Path) -> Result<(), StorageError> {
         // Verify source file exists
         if !src.exists() {
-            return Err(StorageError::RestoreFailed(format!(
-                "backup file does not exist: {}",
-                src.display()
-            )));
+            return Err(StorageError::RestoreRejected(
+                RestoreRejection::SourceMissing,
+                format!("backup file does not exist: {}", src.display()),
+            ));
         }
 
         // Refuse to restore from the live DB or from the path the safety backup
@@ -703,10 +703,13 @@ impl StorageLayer {
         }
         for path in forbidden {
             if std::fs::canonicalize(path).ok().as_deref() == Some(canonical_src.as_path()) {
-                return Err(StorageError::RestoreFailed(format!(
-                    "cannot restore from {}: it is the live database or its safety backup",
-                    src.display()
-                )));
+                return Err(StorageError::RestoreRejected(
+                    RestoreRejection::LiveDatabase,
+                    format!(
+                        "cannot restore from {}: it is the live database or its safety backup",
+                        src.display()
+                    ),
+                ));
             }
         }
 
@@ -746,7 +749,10 @@ impl StorageLayer {
         let attach = sqlx::query("ATTACH DATABASE ?1 AS restore_src")
             .bind(src.to_string_lossy().to_string());
         (&mut *conn).execute(attach).await.map_err(|e| {
-            StorageError::RestoreFailed(format!("failed to open backup file: {}", e))
+            StorageError::RestoreRejected(
+                RestoreRejection::NotADatabase,
+                format!("failed to open backup file: {}", e),
+            )
         })?;
 
         let result = self
@@ -783,17 +789,20 @@ impl StorageLayer {
             .fetch_all("PRAGMA restore_src.integrity_check")
             .await
             .map_err(|e| {
-                StorageError::RestoreFailed(format!("backup is not a valid database: {}", e))
+                StorageError::RestoreRejected(
+                    RestoreRejection::NotADatabase,
+                    format!("backup is not a valid database: {}", e),
+                )
             })?;
         let messages: Vec<String> = rows
             .iter()
             .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
             .collect();
         if messages != ["ok"] {
-            return Err(StorageError::RestoreFailed(format!(
-                "backup failed integrity check: {}",
-                messages.join("; ")
-            )));
+            return Err(StorageError::RestoreRejected(
+                RestoreRejection::IntegrityCheckFailed,
+                format!("backup failed integrity check: {}", messages.join("; ")),
+            ));
         }
 
         // Every restored table must exist in the source
@@ -808,10 +817,10 @@ impl StorageLayer {
             .collect();
         for table in RESTORED_TABLES {
             if !tables.iter().any(|t| t == table) {
-                return Err(StorageError::RestoreFailed(format!(
-                    "backup is missing table '{}'",
-                    table
-                )));
+                return Err(StorageError::RestoreRejected(
+                    RestoreRejection::MissingTable,
+                    format!("backup is missing table '{}'", table),
+                ));
             }
         }
 
@@ -3110,7 +3119,10 @@ mod restore_tests {
         assert!(safety.exists());
         assert!(matches!(
             storage.restore(&safety).await,
-            Err(StorageError::RestoreFailed(_))
+            Err(StorageError::RestoreRejected(
+                RestoreRejection::LiveDatabase,
+                _
+            ))
         ));
         assert_eq!(total_today(&storage).await, Some(107));
     }
@@ -3125,7 +3137,13 @@ mod restore_tests {
         let result = storage.restore(&bogus).await;
 
         assert!(
-            matches!(result, Err(StorageError::RestoreFailed(_))),
+            matches!(
+                result,
+                Err(StorageError::RestoreRejected(
+                    RestoreRejection::NotADatabase | RestoreRejection::IntegrityCheckFailed,
+                    _
+                ))
+            ),
             "got {:?}",
             result
         );
@@ -3153,10 +3171,10 @@ mod restore_tests {
         let result = storage.restore(&foreign).await;
 
         match result {
-            Err(StorageError::RestoreFailed(msg)) => {
+            Err(StorageError::RestoreRejected(RestoreRejection::MissingTable, msg)) => {
                 assert!(msg.contains("usage_events"), "{}", msg)
             }
-            other => panic!("expected RestoreFailed, got {:?}", other),
+            other => panic!("expected MissingTable, got {:?}", other),
         }
         assert_eq!(total_today(&storage).await, Some(100));
     }
@@ -3168,7 +3186,13 @@ mod restore_tests {
 
         let result = storage.restore(&db_path).await;
 
-        assert!(matches!(result, Err(StorageError::RestoreFailed(_))));
+        assert!(matches!(
+            result,
+            Err(StorageError::RestoreRejected(
+                RestoreRejection::LiveDatabase,
+                _
+            ))
+        ));
         assert_eq!(total_today(&storage).await, Some(100));
     }
 }

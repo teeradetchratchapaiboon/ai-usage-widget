@@ -24,6 +24,8 @@ impl NetworkGuard {
     pub fn new() -> Self {
         let mut allowed_hosts = HashSet::new();
         allowed_hosts.insert("api.github.com".to_string());
+        // Release assets and the updater's latest.json
+        allowed_hosts.insert("github.com".to_string());
         allowed_hosts.insert("localhost".to_string());
         allowed_hosts.insert("127.0.0.1".to_string());
 
@@ -158,6 +160,17 @@ mod tests {
     }
 
     #[test]
+    fn test_github_com_allowed() {
+        let guard = NetworkGuard::new();
+        assert!(
+            guard.is_allowed("https://github.com/owner/repo/releases/latest/download/latest.json")
+        );
+        // Look-alikes and other subdomains stay denied
+        assert!(!guard.is_allowed("https://github.com.evil.io/x"));
+        assert!(!guard.is_allowed("https://gist.github.com/x"));
+    }
+
+    #[test]
     fn test_localhost_allowed() {
         let guard = NetworkGuard::new();
         assert!(guard.is_allowed("http://localhost:3000/api/data"));
@@ -280,7 +293,7 @@ mod prop_tests_network_guard {
             .prop_map(|(name, tld)| format!("{}.{}", name, tld))
             .prop_filter("must not be an allowlisted or blocked domain", |domain| {
                 let blocked = ["openai.com", "anthropic.com", "chatgpt.com", "claude.ai"];
-                let allowed = ["api.github.com", "localhost", "127.0.0.1"];
+                let allowed = ["api.github.com", "github.com", "localhost", "127.0.0.1"];
                 !blocked
                     .iter()
                     .any(|b| domain == *b || domain.ends_with(&format!(".{}", b)))

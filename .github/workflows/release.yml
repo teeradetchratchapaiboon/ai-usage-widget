@@ -75,21 +75,71 @@ jobs:
         working-directory: src-tauri
         run: cargo test --all-targets
 
+      # createUpdaterArtifacts in tauri.conf.json makes the build sign the
+      # installer; fail early with a clear message instead of mid-bundle.
+      - name: Check signing secret is configured
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "TAURI_SIGNING_PRIVATE_KEY secret is not set"
+          }
+
       - name: Build NSIS installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --bundles nsis
 
-      - name: Prepare the only release asset
+      - name: Prepare release assets
         id: asset
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          $installers = @(Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe" -File)
+          $bundleDir = "src-tauri/target/release/bundle/nsis"
+          $installers = @(Get-ChildItem $bundleDir -Filter "*-setup.exe" -File)
           if ($installers.Count -ne 1) {
             throw "Expected exactly one NSIS installer, found $($installers.Count)"
           }
+          $signatures = @(Get-ChildItem $bundleDir -Filter "*-setup.exe.sig" -File)
+          if ($signatures.Count -ne 1) {
+            throw "Expected exactly one installer signature, found $($signatures.Count)"
+          }
 
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          $asset = "release/AI-Usage-Widget-Windows-x64-Setup.exe"
+          $assetName = "AI-Usage-Widget-Windows-x64-Setup.exe"
+          $asset = "release/$assetName"
+          # The signature covers the file bytes, so renaming keeps it valid
           Copy-Item $installers[0].FullName $asset
+          Copy-Item $signatures[0].FullName "$asset.sig"
+
+          $sig = (Get-Content -Raw $signatures[0].FullName).Trim()
+          if ([string]::IsNullOrWhiteSpace($sig)) {
+            throw "Installer signature is empty"
+          }
+
+          $manifest = [ordered]@{
+            version   = $env:RELEASE_VERSION
+            notes     = "AI Usage Widget v$($env:RELEASE_VERSION). See https://github.com/$($env:REPO)/releases/tag/$($env:RELEASE_TAG)"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $sig
+                url       = "https://github.com/$($env:REPO)/releases/download/$($env:RELEASE_TAG)/$assetName"
+              }
+            }
+          }
+          $manifestPath = Join-Path (Resolve-Path release) "latest.json"
+          [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+
+          $check = Get-Content -Raw $manifestPath | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace($check.platforms.'windows-x86_64'.signature)) {
+            throw "latest.json has no windows-x86_64 signature"
+          }
           "path=$asset" >> $env:GITHUB_OUTPUT
 
       - name: Publish GitHub Release
@@ -99,4 +149,7 @@ jobs:
           name: AI Usage Widget ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: ${{ steps.asset.outputs.path }}
+          files: |
+            release/AI-Usage-Widget-Windows-x64-Setup.exe
+            release/AI-Usage-Widget-Windows-x64-Setup.exe.sig
+            release/latest.json

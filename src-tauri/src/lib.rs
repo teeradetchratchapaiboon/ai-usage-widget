@@ -1,3 +1,4 @@
+pub mod command_error;
 pub mod commands;
 pub mod config;
 pub mod dedup;
@@ -180,7 +181,10 @@ pub fn run() {
     let reconciliation = Arc::new(ReconciliationEngine::new());
 
     // ─── 8. Create AppState for Tauri managed state ─────────────────────────
+    // Read by the toast notifier, written by update_settings on a language change.
+    let locale = Arc::new(std::sync::RwLock::new(config.locale.clone()));
     let app_state = AppState {
+        locale: locale.clone(),
         storage: storage.clone(),
         registry: registry.clone(),
         scheduler: scheduler_handle,
@@ -208,6 +212,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second launch acts as a remote control for the running instance:
@@ -338,10 +343,11 @@ pub fn run() {
             let notifier: crate::scheduler::Notifier = Arc::new(move |entry| {
                 use tauri_plugin_notification::NotificationExt;
 
-                let title = match entry.level {
-                    crate::notify::NotificationLevel::Critical => "AI Usage Widget — Critical",
-                    crate::notify::NotificationLevel::Warning => "AI Usage Widget — Warning",
-                };
+                let current_locale = locale
+                    .read()
+                    .map(|l| l.clone())
+                    .unwrap_or_else(|p| p.into_inner().clone());
+                let title = crate::notify::notification_title(&entry.level, &current_locale);
 
                 if let Err(e) = notify_handle
                     .notification()
@@ -379,6 +385,7 @@ pub fn run() {
             commands::backup_data,
             commands::restore_data,
             commands::check_for_updates,
+            commands::install_update,
             commands::open_dashboard,
             commands::show_widget,
             commands::set_widget_collapsed,

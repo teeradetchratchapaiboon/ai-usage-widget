@@ -86,10 +86,8 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
     // Validate locale if provided
     if let Some(ref locale) = settings.locale {
         if !ALLOWED_LOCALES.contains(&locale.as_str()) {
-            return Err(ValidationError::InvalidLocale(format!(
-                "'{}' is not supported, allowed values: {:?}",
-                locale, ALLOWED_LOCALES
-            )));
+            // The Display text lists the allowed values (see error.rs).
+            return Err(ValidationError::InvalidLocale(locale.clone()));
         }
     }
 
@@ -123,10 +121,10 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
     ] {
         if let Some(pct) = value {
             if !(0.0..=100.0).contains(&pct) || pct.is_nan() {
-                return Err(ValidationError::InvalidThreshold(format!(
-                    "{} threshold must be between 0 and 100, got {}",
-                    label, pct
-                )));
+                return Err(ValidationError::ThresholdOutOfRange {
+                    label: label.to_string(),
+                    value: pct,
+                });
             }
         }
     }
@@ -136,10 +134,7 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
         settings.notification_critical_pct,
     ) {
         if warning >= critical {
-            return Err(ValidationError::InvalidThreshold(format!(
-                "warning threshold ({}) must be below critical threshold ({})",
-                warning, critical
-            )));
+            return Err(ValidationError::ThresholdOrder { warning, critical });
         }
     }
 
@@ -168,10 +163,7 @@ pub fn validate_thresholds_against_current(
         .notification_critical_pct
         .unwrap_or(current_critical);
     if warning >= critical {
-        return Err(ValidationError::InvalidThreshold(format!(
-            "warning threshold ({}) must be below critical threshold ({})",
-            warning, critical
-        )));
+        return Err(ValidationError::ThresholdOrder { warning, critical });
     }
 
     Ok(())
@@ -363,7 +355,7 @@ mod tests {
         };
         assert!(matches!(
             validate_thresholds_against_current(&settings, 75.0, 90.0),
-            Err(ValidationError::InvalidThreshold(_))
+            Err(ValidationError::ThresholdOrder { .. })
         ));
     }
 
@@ -426,7 +418,14 @@ mod tests {
             ..Default::default()
         };
         let result = validate_settings(&settings);
-        assert!(matches!(result, Err(ValidationError::InvalidLocale(_))));
+        assert_eq!(
+            result,
+            Err(ValidationError::InvalidLocale("fr".to_string()))
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "invalid locale: 'fr' is not supported, allowed values: [\"th\", \"en\"]"
+        );
     }
 
     #[test]
