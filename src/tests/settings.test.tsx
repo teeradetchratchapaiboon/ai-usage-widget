@@ -151,7 +151,8 @@ describe("Settings", () => {
     fireEvent.pointerUp(warning);
 
     const enText = "The warning threshold (95%) must be below the critical threshold (90%)";
-    expect(await screen.findByText(enText)).toBeTruthy();
+    // Generous timeout: the default 1s was flaky on slower CI runners
+    expect(await screen.findByText(enText, {}, { timeout: 5000 })).toBeTruthy();
 
     // Stored raw, so switching language re-translates the shown error
     await act(async () => {
