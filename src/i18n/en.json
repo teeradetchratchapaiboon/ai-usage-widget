@@ -73,7 +73,11 @@
     "backup": "Backup",
     "restore": "Restore",
     "dataDirectory": "Data Directory",
-    "title": "Settings"
+    "title": "Settings",
+    "warningThreshold": "Warning",
+    "criticalThreshold": "Critical",
+    "collectResult": "+{{events}} ({{providers}} providers)",
+    "backupPathPlaceholder": "e.g. C:\\backup\\usage.db"
   },
   "time": {
     "lastUpdated": "Last updated",

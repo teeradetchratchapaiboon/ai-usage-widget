@@ -207,15 +207,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A second launch acts as a remote control for the running instance:
             // `ai-usage-widget.exe --dashboard [--settings]` opens the dashboard.
@@ -240,6 +233,8 @@ pub fn run() {
             for note in &startup_notes {
                 log::info!("{}", note);
             }
+
+            let args: Vec<String> = std::env::args().collect();
 
             // Restore the placement the user left the widget in.
             //
@@ -268,17 +263,21 @@ pub fn run() {
                         .set_position(tauri::LogicalPosition::new(position.x, position.y));
                 }
 
-                // Unconditional: every step above is best-effort, and a widget
-                // that stays hidden because one of them failed is unreachable
-                // except through the tray.
-                let _ = main_window.show();
+                // Shown regardless of the best-effort steps above, since a
+                // widget that stays hidden because one of them failed is
+                // unreachable except through the tray. The only exception is an
+                // autostart launch (`--minimized`), which stays in the tray.
+                if !window::launched_minimized(&args) {
+                    let _ = main_window.show();
+                } else {
+                    log::info!("Launched with --minimized; widget stays in the tray");
+                }
             }
 
             // Build system tray with context menu
             let _tray = tray::build_system_tray(app, &tray_locale)?;
 
             // Open the dashboard straight away when asked on the command line
-            let args: Vec<String> = std::env::args().collect();
             if args.iter().any(|a| a == "--dashboard" || a == "--settings") {
                 let tab = if args.iter().any(|a| a == "--settings") {
                     "settings"
@@ -367,16 +366,6 @@ pub fn run() {
                     )
                     .await;
             });
-
-            // Disable DevTools in production builds
-            #[cfg(not(debug_assertions))]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    // In production, devtools are not available by default in Tauri 2
-                    // but we explicitly ensure they're not enabled
-                    let _ = window;
-                }
-            }
 
             Ok(())
         })

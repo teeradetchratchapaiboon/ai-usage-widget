@@ -30,7 +30,6 @@ vi.mock("../lib/tauri", () => ({
     appEventHandlers.set(event, handler);
     return () => appEventHandlers.delete(event);
   },
-  toggleMaximizeWindow: async () => {},
 }));
 
 const mockInvoke = vi.fn();

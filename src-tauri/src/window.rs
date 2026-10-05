@@ -242,6 +242,13 @@ impl WindowManager {
     }
 }
 
+/// True when the process was launched by the autostart entry, which appends
+/// `--minimized` (see `tray::register_autostart`) so the widget starts in the
+/// tray instead of popping up at every login.
+pub fn launched_minimized<S: AsRef<str>>(args: &[S]) -> bool {
+    args.iter().any(|a| a.as_ref() == "--minimized")
+}
+
 /// Tauri-integrated window operations.
 /// These functions require the Tauri AppHandle and are separated from the
 /// pure-logic WindowManager to allow testing without a running Tauri app.
@@ -512,6 +519,13 @@ mod tests {
 
     fn test_data_dir() -> PathBuf {
         std::env::temp_dir().join("ai_usage_widget_test_window")
+    }
+
+    #[test]
+    fn test_launched_minimized_detects_autostart_flag() {
+        assert!(launched_minimized(&["app.exe", "--minimized"]));
+        assert!(!launched_minimized(&["app.exe"]));
+        assert!(!launched_minimized(&["app.exe", "--dashboard"]));
     }
 
     #[test]

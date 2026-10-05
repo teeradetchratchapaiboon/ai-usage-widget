@@ -73,7 +73,11 @@
     "backup": "สำรองข้อมูล",
     "restore": "กู้คืนข้อมูล",
     "dataDirectory": "โฟลเดอร์ข้อมูล",
-    "title": "ตั้งค่า"
+    "title": "ตั้งค่า",
+    "warningThreshold": "เตือน",
+    "criticalThreshold": "วิกฤต",
+    "collectResult": "+{{events}} ({{providers}} โปรแกรม)",
+    "backupPathPlaceholder": "เช่น C:\\backup\\usage.db"
   },
   "time": {
     "lastUpdated": "อัปเดตล่าสุด",

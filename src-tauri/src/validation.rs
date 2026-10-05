@@ -146,6 +146,37 @@ pub fn validate_settings(settings: &PartialSettings) -> Result<(), ValidationErr
     Ok(())
 }
 
+/// Validate warning < critical after merging a partial update with the
+/// current config.
+///
+/// `validate_settings` can only compare the pair when both arrive together;
+/// a patch that moves just one slider would otherwise slip past and leave the
+/// stored warning at or above critical. Patches without threshold fields are
+/// not checked, so an already-inconsistent config does not block unrelated
+/// settings.
+pub fn validate_thresholds_against_current(
+    settings: &PartialSettings,
+    current_warning: f64,
+    current_critical: f64,
+) -> Result<(), ValidationError> {
+    if settings.notification_warning_pct.is_none() && settings.notification_critical_pct.is_none() {
+        return Ok(());
+    }
+
+    let warning = settings.notification_warning_pct.unwrap_or(current_warning);
+    let critical = settings
+        .notification_critical_pct
+        .unwrap_or(current_critical);
+    if warning >= critical {
+        return Err(ValidationError::InvalidThreshold(format!(
+            "warning threshold ({}) must be below critical threshold ({})",
+            warning, critical
+        )));
+    }
+
+    Ok(())
+}
+
 /// Validate a granularity value.
 ///
 /// Always valid since the enum covers all cases, but included for completeness
@@ -320,6 +351,57 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_settings(&ok).is_ok());
+    }
+
+    // ─── validate_thresholds_against_current ───────────────────────────
+
+    #[test]
+    fn test_warning_only_above_current_critical_rejected() {
+        let settings = PartialSettings {
+            notification_warning_pct: Some(95.0),
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_thresholds_against_current(&settings, 75.0, 90.0),
+            Err(ValidationError::InvalidThreshold(_))
+        ));
+    }
+
+    #[test]
+    fn test_critical_only_below_current_warning_rejected() {
+        let settings = PartialSettings {
+            notification_critical_pct: Some(70.0),
+            ..Default::default()
+        };
+        assert!(validate_thresholds_against_current(&settings, 75.0, 90.0).is_err());
+    }
+
+    #[test]
+    fn test_warning_only_below_current_critical_accepted() {
+        let settings = PartialSettings {
+            notification_warning_pct: Some(80.0),
+            ..Default::default()
+        };
+        assert!(validate_thresholds_against_current(&settings, 75.0, 90.0).is_ok());
+    }
+
+    #[test]
+    fn test_warning_equal_to_current_critical_rejected() {
+        let settings = PartialSettings {
+            notification_warning_pct: Some(90.0),
+            ..Default::default()
+        };
+        assert!(validate_thresholds_against_current(&settings, 75.0, 90.0).is_err());
+    }
+
+    #[test]
+    fn test_no_threshold_fields_skips_pair_check() {
+        let settings = PartialSettings {
+            locale: Some("en".to_string()),
+            ..Default::default()
+        };
+        // Current values are inconsistent, but this patch does not touch them
+        assert!(validate_thresholds_against_current(&settings, 95.0, 90.0).is_ok());
     }
 
     #[test]

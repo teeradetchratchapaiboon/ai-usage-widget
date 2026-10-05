@@ -214,8 +214,9 @@ impl CollectionScheduler {
                 break;
             }
 
-            // 2. Collect from all providers (with error isolation per provider)
-            let outcomes = registry.collect_all();
+            // 2. Collect from all providers (with error isolation per provider),
+            // off the async workers because adapters do blocking I/O.
+            let outcomes = crate::registry::collect_all_blocking(registry.clone()).await;
 
             // 3. Separate successes from failures
             let mut all_events = Vec::new();

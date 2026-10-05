@@ -11,7 +11,9 @@ use crate::provider::ProviderSummary;
 use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::registry::ProviderRegistry;
 use crate::storage::StorageLayer;
-use crate::validation::{validate_settings, validate_time_range, PartialSettings};
+use crate::validation::{
+    validate_settings, validate_thresholds_against_current, validate_time_range, PartialSettings,
+};
 
 // ─── Managed Application State ─────────────────────────────────────────────────
 
@@ -406,7 +408,80 @@ pub fn hide_widget(app: tauri::AppHandle) -> Result<(), String> {
 /// invisible: the window just renders blank.
 #[tauri::command]
 pub fn log_frontend_error(window: String, message: String) {
+    let (window, message) = sanitize_frontend_log(&window, &message);
     log::error!("[webview:{}] {}", window, message);
+}
+
+/// Upper bound on a single frontend log message, so a runaway error loop or a
+/// huge stack cannot flood the log file.
+const MAX_FRONTEND_LOG_BYTES: usize = 4096;
+
+/// Window labels the frontend can legitimately report from.
+const FRONTEND_LOG_WINDOWS: [&str; 2] = ["main", "dashboard"];
+
+/// Normalize what the webview sends before it reaches the log.
+///
+/// The label is reduced to a known window name, the message is capped at
+/// `MAX_FRONTEND_LOG_BYTES` (on a char boundary), and CR/LF are escaped so a
+/// single call is always a single log line and cannot forge extra entries.
+fn sanitize_frontend_log(window: &str, message: &str) -> (&'static str, String) {
+    let label = FRONTEND_LOG_WINDOWS
+        .iter()
+        .copied()
+        .find(|w| *w == window)
+        .unwrap_or("unknown");
+
+    let mut end = message.len().min(MAX_FRONTEND_LOG_BYTES);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut sanitized = message[..end].replace('\r', "\\r").replace('\n', "\\n");
+    if end < message.len() {
+        sanitized.push_str(&format!("…[truncated {} bytes]", message.len() - end));
+    }
+
+    (label, sanitized)
+}
+
+#[cfg(test)]
+mod frontend_log_tests {
+    use super::*;
+
+    #[test]
+    fn known_window_label_is_kept() {
+        assert_eq!(sanitize_frontend_log("main", "x").0, "main");
+        assert_eq!(sanitize_frontend_log("dashboard", "x").0, "dashboard");
+    }
+
+    #[test]
+    fn unknown_window_label_is_replaced() {
+        assert_eq!(sanitize_frontend_log("evil\nlabel", "x").0, "unknown");
+    }
+
+    #[test]
+    fn long_message_is_truncated() {
+        let msg = "a".repeat(10 * 1024);
+        let (_, out) = sanitize_frontend_log("main", &msg);
+        let suffix = format!("…[truncated {} bytes]", 10 * 1024 - MAX_FRONTEND_LOG_BYTES);
+        assert!(out.ends_with(&suffix));
+        assert_eq!(out.len(), MAX_FRONTEND_LOG_BYTES + suffix.len());
+    }
+
+    #[test]
+    fn multibyte_message_truncates_on_char_boundary() {
+        // Thai characters are 3 bytes each, so 4096 is not a char boundary
+        let msg = "ก".repeat(2000);
+        let (_, out) = sanitize_frontend_log("main", &msg);
+        assert!(out.contains("…[truncated "));
+        assert!(out.starts_with("กก"));
+    }
+
+    #[test]
+    fn newlines_are_escaped() {
+        let (_, out) = sanitize_frontend_log("main", "line1\r\nline2\nfake entry");
+        assert_eq!(out, "line1\\r\\nline2\\nfake entry");
+        assert!(!out.contains('\n'));
+    }
 }
 
 /// Trigger an immediate collection cycle.
@@ -414,7 +489,7 @@ pub fn log_frontend_error(window: String, message: String) {
 pub async fn trigger_collection(
     state: tauri::State<'_, AppState>,
 ) -> Result<CollectionResponse, String> {
-    let outcomes = state.registry.collect_all();
+    let outcomes = crate::registry::collect_all_blocking(state.registry.clone()).await;
 
     let mut all_events = Vec::new();
     let mut providers_collected: u32 = 0;
@@ -513,6 +588,16 @@ pub async fn update_settings(
     // Invariant: nothing below awaits while this guard is held, so a slow or
     // stuck subsystem cannot block every other user of the config.
     let mut config = state.config.lock().await;
+
+    // The pair check needs the stored values when only one threshold changes;
+    // done under the guard and before any mutation so a rejection leaves the
+    // config untouched.
+    validate_thresholds_against_current(
+        &settings,
+        config.notification_warning_pct,
+        config.notification_critical_pct,
+    )
+    .map_err(|e| format!("Settings validation failed: {}", e))?;
 
     // Apply partial updates
     if let Some(ref locale) = settings.locale {
