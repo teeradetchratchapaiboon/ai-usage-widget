@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use log::{error, info, warn};
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::sync::{watch, Mutex};
+use tokio::time::{sleep_until, Duration, Instant};
 
 use crate::dedup::DeduplicationEngine;
 use crate::notify::{NotificationEngine, NotificationEntry, QuotaReading, QuotaWindow};
@@ -21,6 +21,68 @@ const ADAPTIVE_INTERVAL: u32 = 15;
 
 /// Maximum backoff interval in seconds.
 const MAX_BACKOFF: u32 = 300;
+
+/// Settings the running collection loop picks up without a restart.
+///
+/// Delivered over a `watch` channel rather than by mutating the scheduler,
+/// because the scheduler is owned by the task that runs its loop and never
+/// returns to anyone else while the app is alive.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SchedulerSettings {
+    /// Default collection interval in seconds.
+    pub interval_secs: u32,
+    /// Quota warning threshold (percent).
+    pub warning_pct: f64,
+    /// Quota critical threshold (percent).
+    pub critical_pct: f64,
+}
+
+/// Cloneable, lock-free control surface for a running [`CollectionScheduler`].
+///
+/// The scheduler used to sit behind a `tokio::sync::Mutex` that the collection
+/// task locked once and then held for the whole `while is_running` loop, so any
+/// command that awaited that lock (changing notification thresholds) hung
+/// forever — while holding the config lock, which then blocked every other
+/// settings command too. The handle avoids that by design: every method is
+/// synchronous and no lock is ever held across the loop. Settings travel over
+/// a `watch` channel the loop selects on, so a new interval also wakes the
+/// loop instead of waiting out the old one.
+#[derive(Clone)]
+pub struct SchedulerHandle {
+    settings: Arc<watch::Sender<SchedulerSettings>>,
+    is_running: Arc<AtomicBool>,
+}
+
+impl SchedulerHandle {
+    /// Replace the quota notification thresholds (percent) on the running loop.
+    ///
+    /// `send_modify` stores the value even when the loop has not subscribed
+    /// yet (or has exited), so the next reader always sees the latest settings.
+    pub fn set_notification_thresholds(&self, warning: f64, critical: f64) {
+        self.settings.send_modify(|s| {
+            s.warning_pct = warning;
+            s.critical_pct = critical;
+        });
+    }
+
+    /// Replace the default collection interval (seconds) on the running loop.
+    ///
+    /// Takes effect immediately: the loop's pending sleep is restarted with the
+    /// new interval rather than finishing the old one.
+    pub fn set_interval(&self, secs: u32) {
+        self.settings.send_modify(|s| s.interval_secs = secs);
+    }
+
+    /// Stop the collection loop gracefully after its current sleep.
+    pub fn stop(&self) {
+        self.is_running.store(false, Ordering::SeqCst);
+    }
+
+    /// The most recently requested settings.
+    pub fn settings(&self) -> SchedulerSettings {
+        *self.settings.borrow()
+    }
+}
 
 /// Scheduler that drives periodic data collection from all registered providers.
 ///
@@ -40,6 +102,10 @@ pub struct CollectionScheduler {
     is_running: Arc<AtomicBool>,
     /// Quota threshold tracking (75% / 90% with per-provider cooldowns).
     notifications: NotificationEngine,
+    /// Sending side of the settings channel, shared with every [`SchedulerHandle`].
+    settings_tx: Arc<watch::Sender<SchedulerSettings>>,
+    /// Receiving side the loop subscribes to; kept so the channel never closes.
+    settings_rx: watch::Receiver<SchedulerSettings>,
 }
 
 /// Sink invoked when a quota threshold is crossed.
@@ -48,12 +114,30 @@ pub type Notifier = Arc<dyn Fn(&NotificationEntry) + Send + Sync>;
 impl CollectionScheduler {
     /// Create a new scheduler with the given default interval (in seconds).
     pub fn new(default_interval: u32) -> Self {
+        // Same thresholds as NotificationEngine::new, so the channel and the
+        // engine agree before anyone sets them.
+        let (settings_tx, settings_rx) = watch::channel(SchedulerSettings {
+            interval_secs: default_interval,
+            warning_pct: 75.0,
+            critical_pct: 90.0,
+        });
         Self {
             interval_secs: default_interval,
             default_interval,
             consecutive_errors: 0,
             is_running: Arc::new(AtomicBool::new(false)),
             notifications: NotificationEngine::new(),
+            settings_tx: Arc::new(settings_tx),
+            settings_rx,
+        }
+    }
+
+    /// A handle for changing settings and stopping the loop once the
+    /// scheduler itself has been moved into its task.
+    pub fn handle(&self) -> SchedulerHandle {
+        SchedulerHandle {
+            settings: self.settings_tx.clone(),
+            is_running: self.is_running.clone(),
         }
     }
 
@@ -95,10 +179,35 @@ impl CollectionScheduler {
             self.default_interval
         );
 
+        // Pick up whatever was set through a handle before the loop started.
+        let mut rx = self.settings_rx.clone();
+        let initial = *rx.borrow_and_update();
+        self.apply_settings(initial);
+
         while self.is_running.load(Ordering::SeqCst) {
-            // 1. Sleep for the current interval
-            let interval = std::time::Duration::from_secs(self.interval_secs as u64);
-            sleep(interval).await;
+            // 1. Sleep for the current interval, waking early for settings
+            // changes. A new interval restarts the wait so it takes effect now
+            // instead of after the old (possibly long) one runs out.
+            let mut deadline = Instant::now() + Duration::from_secs(self.interval_secs as u64);
+            loop {
+                tokio::select! {
+                    _ = sleep_until(deadline) => break,
+                    changed = rx.changed() => match changed {
+                        Ok(()) => {
+                            let settings = *rx.borrow_and_update();
+                            if self.apply_settings(settings) {
+                                deadline = Instant::now()
+                                    + Duration::from_secs(self.interval_secs as u64);
+                            }
+                        }
+                        // Sender gone: no more changes can arrive, just finish the wait.
+                        Err(_) => {
+                            sleep_until(deadline).await;
+                            break;
+                        }
+                    },
+                }
+            }
 
             // Check stop signal after waking
             if !self.is_running.load(Ordering::SeqCst) {
@@ -255,6 +364,40 @@ impl CollectionScheduler {
     /// re-notify for a provider that already warned.
     pub fn set_notification_thresholds(&mut self, warning: f64, critical: f64) {
         self.notifications.set_thresholds(warning, critical);
+        // Keep the channel in step, or the loop's first read would put the
+        // defaults back.
+        self.settings_tx.send_modify(|s| {
+            s.warning_pct = warning;
+            s.critical_pct = critical;
+        });
+    }
+
+    /// Apply settings received from a [`SchedulerHandle`].
+    ///
+    /// Thresholds are always applied. Returns `true` when the default interval
+    /// changed, so the caller can restart its pending sleep. During backoff the
+    /// current interval is recomputed from the new default rather than
+    /// dropping straight to it, so a failing provider is not hammered.
+    fn apply_settings(&mut self, settings: SchedulerSettings) -> bool {
+        self.notifications
+            .set_thresholds(settings.warning_pct, settings.critical_pct);
+
+        let interval = settings.interval_secs.max(1);
+        if interval == self.default_interval {
+            return false;
+        }
+
+        self.default_interval = interval;
+        self.interval_secs = if self.consecutive_errors > 0 {
+            self.backoff_interval()
+        } else {
+            self.default_interval
+        };
+        info!(
+            "Collection interval changed to {}s (next wait: {}s)",
+            self.default_interval, self.interval_secs
+        );
+        true
     }
 
     /// Stop the collection loop gracefully.
@@ -435,6 +578,142 @@ mod tests {
         scheduler.is_running.store(true, Ordering::SeqCst);
         scheduler.stop();
         assert!(!scheduler.is_running.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_apply_settings_updates_interval_and_backoff() {
+        let mut scheduler = CollectionScheduler::new(30);
+        let handle = scheduler.handle();
+
+        handle.set_interval(60);
+        assert!(scheduler.apply_settings(handle.settings()));
+        assert_eq!(scheduler.default_interval, 60);
+        assert_eq!(scheduler.interval_secs, 60);
+
+        // Same settings again: nothing to restart
+        assert!(!scheduler.apply_settings(handle.settings()));
+
+        // During backoff the wait is recomputed from the new default
+        scheduler.consecutive_errors = 2;
+        handle.set_interval(61);
+        assert!(scheduler.apply_settings(handle.settings()));
+        handle.set_interval(60);
+        assert!(scheduler.apply_settings(handle.settings()));
+        assert_eq!(scheduler.interval_secs, (60 * 4).min(MAX_BACKOFF));
+    }
+
+    /// Provider reporting an 80% five-hour quota, observed just now.
+    struct QuotaProvider;
+
+    impl crate::provider::ProviderAdapter for QuotaProvider {
+        fn provider_id(&self) -> &str {
+            "quota-test"
+        }
+        fn display_name(&self) -> &str {
+            "Quota Test"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn collect(
+            &self,
+            _since: Option<chrono::DateTime<Utc>>,
+        ) -> Result<crate::provider::CollectionResult, crate::error::CollectionError> {
+            Ok(crate::provider::CollectionResult {
+                events: vec![],
+                checkpoint: Utc::now(),
+                source_metadata: crate::provider::SourceMetadata {
+                    files_read: 0,
+                    bytes_processed: 0,
+                    errors: vec![],
+                },
+            })
+        }
+        fn get_current_summary(
+            &self,
+        ) -> Result<crate::provider::ProviderSummary, crate::error::CollectionError> {
+            Ok(crate::provider::ProviderSummary {
+                provider_id: "quota-test".to_string(),
+                display_name: "Quota Test".to_string(),
+                is_available: true,
+                current_model: None,
+                tokens_today: None,
+                quota: Some(crate::types::QuotaUsage {
+                    fast_hours_pct: Some(80.0),
+                    ..Default::default()
+                }),
+                context_window: None,
+                last_activity: Some(Utc::now()),
+                quota_resets: Default::default(),
+                quota_observed: crate::provider::QuotaObservations {
+                    fast_hours: Some(Utc::now()),
+                    weekly: None,
+                },
+            })
+        }
+        fn last_checkpoint(&self) -> Option<chrono::DateTime<Utc>> {
+            None
+        }
+    }
+
+    /// Regression for the deadlock where the running loop held the scheduler
+    /// mutex forever: settings changes must return immediately and reach the
+    /// loop that is already running, including a new interval.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_settings_reach_running_loop_without_deadlock() {
+        use crate::notify::NotificationLevel;
+        use tokio::time::timeout;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let storage = StorageLayer::new(&tmp.path().join("sched.db"))
+            .await
+            .unwrap();
+        let dedup = DeduplicationEngine::new(Arc::new(storage.pool().clone()))
+            .await
+            .unwrap();
+        let dedup = Arc::new(Mutex::new(dedup));
+        let storage = Arc::new(storage);
+        let reconciliation = Arc::new(ReconciliationEngine::new());
+        let mut registry = ProviderRegistry::new();
+        registry.register(Box::new(QuotaProvider));
+        let registry = Arc::new(registry);
+
+        // Long interval and thresholds above 80%: nothing fires unless the new
+        // settings reach the loop.
+        let mut scheduler = CollectionScheduler::new(300);
+        scheduler.set_notification_thresholds(95.0, 99.0);
+        let handle = scheduler.handle();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let notifier: Notifier = Arc::new(move |entry: &NotificationEntry| {
+            let _ = tx.send(entry.clone());
+        });
+
+        let join = tokio::spawn(async move {
+            scheduler
+                .run_with_notifier(registry, dedup, reconciliation, storage, Some(notifier))
+                .await
+        });
+
+        timeout(Duration::from_secs(1), async {
+            handle.set_notification_thresholds(70.0, 90.0);
+            handle.set_interval(1);
+        })
+        .await
+        .expect("settings update must not block");
+
+        let entry = timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("loop must pick up new interval")
+            .expect("notification");
+        assert_eq!(entry.level, NotificationLevel::Warning);
+        assert_eq!(entry.threshold_pct, 70.0);
+
+        handle.stop();
+        timeout(Duration::from_secs(5), join)
+            .await
+            .expect("loop must stop")
+            .expect("loop task must not panic");
     }
 }
 

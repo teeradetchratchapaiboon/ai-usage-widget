@@ -60,7 +60,14 @@
         }
       ]
     },
-    "shell:allow-open",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/teeradetchratchapaiboon/ai-usage-widget/*"
+        }
+      ]
+    },
     "notification:default",
     "notification:allow-notify",
     "notification:allow-request-permission",

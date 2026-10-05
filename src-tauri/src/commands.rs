@@ -10,7 +10,6 @@ use crate::freshness::QuotaTiming;
 use crate::provider::ProviderSummary;
 use crate::query_types::{Granularity, TimeRange, UsageRecord, UsageSummary};
 use crate::registry::ProviderRegistry;
-use crate::scheduler::CollectionScheduler;
 use crate::storage::StorageLayer;
 use crate::validation::{validate_settings, validate_time_range, PartialSettings};
 
@@ -22,7 +21,8 @@ use crate::validation::{validate_settings, validate_time_range, PartialSettings}
 pub struct AppState {
     pub storage: Arc<StorageLayer>,
     pub registry: Arc<ProviderRegistry>,
-    pub scheduler: Arc<Mutex<CollectionScheduler>>,
+    /// Lock-free control of the running collection loop (see `SchedulerHandle`).
+    pub scheduler: crate::scheduler::SchedulerHandle,
     pub config: Arc<Mutex<AppConfig>>,
     /// Path to the config file on disk for persisting changes.
     pub config_path: PathBuf,
@@ -110,6 +110,24 @@ pub struct UpdateInfo {
 }
 
 // ─── Tauri Commands ─────────────────────────────────────────────────────────────
+
+/// GitHub "latest release" endpoint used by `check_for_updates`.
+///
+/// This is the single source of the update endpoint. The owner/repo must
+/// match `git remote` (github.com/teeradetchratchapaiboon/ai-usage-widget);
+/// a wrong owner makes GitHub answer 404 and the update check silently
+/// reports "no update" forever.
+const RELEASES_URL: &str =
+    "https://api.github.com/repos/teeradetchratchapaiboon/ai-usage-widget/releases/latest";
+
+/// Every download URL handed to the UI must live under this prefix. The
+/// trailing slash matters: it rejects look-alike hosts such as
+/// `ai-usage-widget.evil.com`. It also matches the opener capability scope.
+const RELEASE_PAGE_PREFIX: &str = "https://github.com/teeradetchratchapaiboon/ai-usage-widget/";
+
+/// Used when the API response carries a missing or unexpected `html_url`.
+const RELEASES_PAGE_FALLBACK: &str =
+    "https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/latest";
 
 /// Query the storage layer for today's/this week's usage summary.
 #[tauri::command]
@@ -492,6 +510,8 @@ pub async fn update_settings(
     // Validate inputs before applying
     validate_settings(&settings).map_err(|e| format!("Settings validation failed: {}", e))?;
 
+    // Invariant: nothing below awaits while this guard is held, so a slow or
+    // stuck subsystem cannot block every other user of the config.
     let mut config = state.config.lock().await;
 
     // Apply partial updates
@@ -530,11 +550,16 @@ pub async fn update_settings(
 
     // Notification thresholds take effect on the running scheduler
     if settings.notification_warning_pct.is_some() || settings.notification_critical_pct.is_some() {
-        let mut scheduler = state.scheduler.lock().await;
-        scheduler.set_notification_thresholds(
+        state.scheduler.set_notification_thresholds(
             config.notification_warning_pct,
             config.notification_critical_pct,
         );
+    }
+
+    // A new collection interval takes effect on the running loop right away
+    // (it restarts its pending wait), not only after the next app launch.
+    if let Some(interval) = settings.collection_interval_secs {
+        state.scheduler.set_interval(interval);
     }
 
     // Apply window settings to the running widget, not just to the file
@@ -597,11 +622,18 @@ pub async fn restore_data(path: String, state: tauri::State<'_, AppState>) -> Re
         return Err(format!("Backup file does not exist: {}", path));
     }
 
+    // Hold the dedup lock across the restore so no collection cycle can
+    // deduplicate against a bloom filter that no longer matches the DB.
+    let mut dedup = state.dedup.lock().await;
     state
         .storage
         .restore(&src)
         .await
-        .map_err(|e| format!("Restore failed: {}", e))
+        .map_err(|e| format!("Restore failed: {}", e))?;
+    dedup
+        .reload()
+        .await
+        .map_err(|e| format!("Restore succeeded but reloading dedup cache failed: {}", e))
 }
 
 /// Check GitHub API for available updates (compare semver).
@@ -619,7 +651,6 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
 
     // Every outbound request goes through the network guard: only
     // api.github.com is reachable, provider APIs are blocked outright.
-    const RELEASES_URL: &str = "https://api.github.com/repos/ai-usage-widget/releases/latest";
     let guard = crate::network::NetworkGuard::new();
     if !guard.is_allowed(RELEASES_URL) {
         let audit = guard.audit_blocked_request(RELEASES_URL);
@@ -642,7 +673,14 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
         .map_err(|e| format!("Failed to check for updates: {}", e))?;
 
     if !response.status().is_success() {
-        // No update info available (e.g., 404, rate limited)
+        // No update info available (e.g., 404, rate limited). Log the status
+        // so a misconfigured endpoint is visible instead of silent.
+        let status = response.status();
+        log::warn!(
+            "Update check: GitHub returned HTTP {} for {}",
+            status,
+            RELEASES_URL
+        );
         return Ok(None);
     }
 
@@ -660,7 +698,7 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     // Same comparison the unit tests exercise
     match compare_versions(current_version, tag) {
         Some(latest_version) => {
-            let download_url = release["html_url"].as_str().unwrap_or("").to_string();
+            let download_url = safe_download_url(release["html_url"].as_str().unwrap_or(""));
             let release_notes = release["body"].as_str().map(|s| s.to_string());
 
             Ok(Some(UpdateInfo {
@@ -686,6 +724,66 @@ fn compare_versions(current: &str, latest: &str) -> Option<String> {
         Some(latest_v.to_string())
     } else {
         None
+    }
+}
+
+/// Return `html_url` only if it points at this project's GitHub pages.
+///
+/// The URL comes from a network response and is opened by the UI, so it is
+/// treated as untrusted: anything outside `RELEASE_PAGE_PREFIX` (other hosts,
+/// look-alike domains, plain http, empty) falls back to the releases page.
+fn safe_download_url(html_url: &str) -> String {
+    if html_url.starts_with(RELEASE_PAGE_PREFIX) {
+        html_url.to_string()
+    } else {
+        log::warn!(
+            "Update check: ignoring unexpected release html_url {:?}, using fallback",
+            html_url
+        );
+        RELEASES_PAGE_FALLBACK.to_string()
+    }
+}
+
+#[cfg(test)]
+mod update_url_tests {
+    use super::{safe_download_url, RELEASES_PAGE_FALLBACK, RELEASES_URL, RELEASE_PAGE_PREFIX};
+
+    #[test]
+    fn releases_url_points_at_project_repo() {
+        assert!(RELEASES_URL
+            .starts_with("https://api.github.com/repos/teeradetchratchapaiboon/ai-usage-widget/"));
+    }
+
+    #[test]
+    fn releases_url_is_allowed_by_network_guard() {
+        assert!(crate::network::NetworkGuard::new().is_allowed(RELEASES_URL));
+    }
+
+    #[test]
+    fn fallback_is_under_release_page_prefix() {
+        assert!(RELEASES_PAGE_FALLBACK.starts_with(RELEASE_PAGE_PREFIX));
+    }
+
+    #[test]
+    fn keeps_project_release_url() {
+        let url = "https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/tag/v0.2.0";
+        assert_eq!(safe_download_url(url), url);
+    }
+
+    #[test]
+    fn rejects_untrusted_urls() {
+        for url in [
+            "https://evil.example/x",
+            "https://github.com/teeradetchratchapaiboon/ai-usage-widget.evil.com/x",
+            "http://github.com/teeradetchratchapaiboon/ai-usage-widget/x",
+            "",
+        ] {
+            assert_eq!(
+                safe_download_url(url),
+                RELEASES_PAGE_FALLBACK,
+                "url: {url:?}"
+            );
+        }
     }
 }
 
