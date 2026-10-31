@@ -228,10 +228,7 @@ pub fn run() {
             }
 
             // Otherwise just bring the widget back
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-                let _ = window.show();
-            }
+            tray::show_widget(app);
         }))
         .manage(app_state)
         .setup(move |app| {
@@ -266,6 +263,18 @@ pub fn run() {
                 {
                     let _ = main_window
                         .set_position(tauri::LogicalPosition::new(position.x, position.y));
+                }
+
+                match window::tauri_ops::ensure_widget_on_screen(&main_window) {
+                    Ok(true) => {
+                        let _ = window::tauri_ops::set_click_through(
+                            app.handle(),
+                            &window_manager,
+                            false,
+                        );
+                    }
+                    Ok(false) => {}
+                    Err(e) => log::warn!("Failed to recover widget position: {}", e),
                 }
 
                 // Shown regardless of the best-effort steps above, since a

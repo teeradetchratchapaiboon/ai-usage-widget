@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-01
+
+### Fixed
+
+- Recover the widget onto a connected monitor when its saved position is no
+  longer reachable, including after disconnecting a monitor or changing DPI.
+- Opening the app again, choosing Show Widget in the tray, clicking the tray
+  icon or pressing Win+Shift+U restores an on-screen, clickable widget.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
