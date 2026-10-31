@@ -292,7 +292,6 @@ pub fn build_system_tray(
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
-            use tauri::Manager;
 
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -300,10 +299,7 @@ pub fn build_system_tray(
                 ..
             } = event
             {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_widget(tray.app_handle());
             }
         })
         .on_menu_event(|app, event| {
@@ -411,8 +407,11 @@ pub fn show_widget(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
 
     if let Some(widget) = app.get_webview_window("main") {
-        let _ = widget.show();
-        let _ = widget.set_focus();
+        let state = app.state::<crate::commands::AppState>();
+        if let Err(e) = crate::window::tauri_ops::reveal_widget(app, &state.window_manager) {
+            log::warn!("Failed to reveal widget: {}", e);
+            let _ = widget.show();
+        }
         let _ = app.emit(WIDGET_VISIBILITY_EVENT, true);
     }
 }

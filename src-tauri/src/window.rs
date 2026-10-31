@@ -16,6 +16,64 @@ pub struct WindowPosition {
     pub monitor: Option<String>,
 }
 
+/// Whether enough of the top control strip remains on a connected monitor.
+/// All coordinates are physical pixels, including monitors left of the primary.
+fn controls_are_visible(
+    position: (i32, i32),
+    size: (u32, u32),
+    work_areas: &[(i32, i32, u32, u32)],
+) -> bool {
+    let (x, y) = (i64::from(position.0), i64::from(position.1));
+    let width = i64::from(size.0.min(80));
+    let height = i64::from(size.1.min(32));
+    width > 0
+        && height > 0
+        && work_areas.iter().any(|&(mx, my, mw, mh)| {
+            let (mx, my) = (i64::from(mx), i64::from(my));
+            (x + i64::from(size.0)).min(mx + i64::from(mw)) - x.max(mx) >= width
+                && (y + height).min(my + i64::from(mh)) - y.max(my) >= height
+        })
+}
+
+#[cfg(test)]
+mod monitor_recovery_tests {
+    use super::controls_are_visible;
+
+    #[test]
+    fn disconnected_monitor_position_is_unreachable() {
+        assert!(!controls_are_visible(
+            (2065, 51),
+            (376, 349),
+            &[(0, 0, 1920, 1032)]
+        ));
+    }
+
+    #[test]
+    fn connected_negative_coordinate_monitor_is_preserved() {
+        assert!(controls_are_visible(
+            (-1700, 50),
+            (360, 340),
+            &[(-1920, 0, 1920, 1080), (0, 0, 1920, 1032)]
+        ));
+    }
+
+    #[test]
+    fn controls_above_screen_or_below_taskbar_require_recovery() {
+        let monitors = [(0, 0, 1920, 1032)];
+        assert!(!controls_are_visible((200, -200), (360, 340), &monitors));
+        assert!(!controls_are_visible((200, 1040), (360, 340), &monitors));
+        assert!(!controls_are_visible((1910, 50), (360, 340), &monitors));
+    }
+
+    #[test]
+    fn visible_controls_and_collapsed_widget_are_preserved() {
+        let monitors = [(0, 0, 1920, 1032)];
+        assert!(controls_are_visible((200, 50), (360, 340), &monitors));
+        assert!(controls_are_visible((200, 50), (360, 40), &monitors));
+        assert!(controls_are_visible((1800, 50), (360, 340), &monitors));
+    }
+}
+
 /// Manages the compact widget and dashboard windows.
 ///
 /// Handles creation, toggling, always-on-top behavior, DPI-independent sizing
@@ -268,6 +326,66 @@ pub mod tauri_ops {
         SetWindowLongW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
     };
 
+    /// Recover a saved position after a monitor is disconnected or its layout changes.
+    pub fn ensure_widget_on_screen(window: &tauri::WebviewWindow) -> Result<bool, String> {
+        let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+        if monitors.is_empty() {
+            return Ok(false);
+        }
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let work_areas: Vec<_> = monitors
+            .iter()
+            .map(|monitor| {
+                let area = monitor.work_area();
+                (
+                    area.position.x,
+                    area.position.y,
+                    area.size.width,
+                    area.size.height,
+                )
+            })
+            .collect();
+        if super::controls_are_visible(
+            (position.x, position.y),
+            (size.width, size.height),
+            &work_areas,
+        ) {
+            return Ok(false);
+        }
+        // Prefer the primary monitor; center() may choose the vanished monitor's
+        // nearest replacement differently across platforms.
+        let monitor = window
+            .primary_monitor()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| monitors[0].clone());
+        let area = monitor.work_area();
+        window
+            .set_position(tauri::PhysicalPosition::new(
+                area.position.x + (area.size.width.saturating_sub(size.width) / 2) as i32,
+                area.position.y + (area.size.height.saturating_sub(size.height) / 2) as i32,
+            ))
+            .map_err(|e| e.to_string())?;
+        log::info!(
+            "Recovered widget from off-screen position ({}, {})",
+            position.x,
+            position.y
+        );
+        Ok(true)
+    }
+
+    /// Explicitly showing the widget also recovers it from click-through mode.
+    pub fn reveal_widget(app: &AppHandle, wm: &WindowManager) -> Result<(), String> {
+        let window = app
+            .get_webview_window(wm.compact_label())
+            .ok_or_else(|| "Compact widget window not found".to_string())?;
+        ensure_widget_on_screen(&window)?;
+        set_click_through(app, wm, false)?;
+        window.unminimize().map_err(|e| e.to_string())?;
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())
+    }
+
     /// Create or show the compact widget window with DPI-independent sizing.
     pub fn create_compact_widget(app: &AppHandle, wm: &WindowManager) -> Result<(), String> {
         let label = wm.compact_label();
@@ -501,10 +619,7 @@ pub mod tauri_ops {
                 }
 
                 // Bring the widget to focus
-                if let Some(window) = app_handle.get_webview_window(wm_clone.compact_label()) {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                let _ = reveal_widget(&app_handle, &wm_clone);
             })
             .map_err(|e| e.to_string())?;
 
