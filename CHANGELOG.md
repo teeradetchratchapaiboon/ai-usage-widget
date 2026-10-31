@@ -13,6 +13,12 @@ All notable changes to this project are documented here. The format follows
 - Opening the app again, choosing Show Widget in the tray, clicking the tray
   icon or pressing Win+Shift+U restores an on-screen, clickable widget.
 
+### Security
+
+- Update the updater and its compatible Tauri dependencies to remove vulnerable
+  ZIP extraction dependencies, and update rustls and certificate verification
+  dependencies flagged by the release dependency audit.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
