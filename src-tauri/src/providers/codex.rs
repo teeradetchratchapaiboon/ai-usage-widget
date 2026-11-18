@@ -143,6 +143,19 @@ impl RateLimitSnapshot {
         };
         // A guess must not displace a window that stated its own length
         let known_length = window.window_minutes.is_some();
+        let previous_observed_at = if is_fast {
+            self.fast_observed_at
+        } else {
+            self.weekly_observed_at
+        };
+        // Session files can be read out of timestamp order. Keep a newer
+        // observation for this window when both timestamps are known.
+        if observed_at
+            .zip(previous_observed_at)
+            .is_some_and(|(incoming, previous)| incoming < previous)
+        {
+            return;
+        }
 
         if is_fast {
             if known_length || self.fast_used_pct.is_none() {

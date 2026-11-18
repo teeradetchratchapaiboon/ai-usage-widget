@@ -339,9 +339,9 @@ impl StorageLayer {
         let end_str = range.end.to_rfc3339();
         let strftime_fmt = granularity.strftime_format();
 
-        let query_str = format!(
+        let rows = sqlx::query(
             r#"SELECT
-                strftime('{fmt}', timestamp_utc) as time_bucket,
+                strftime(?3, timestamp_utc) as time_bucket,
                 provider_id,
                 SUM(input_tokens) as sum_input,
                 SUM(output_tokens) as sum_output,
@@ -353,15 +353,13 @@ impl StorageLayer {
               AND datetime(timestamp_utc) < datetime(?2)
             GROUP BY time_bucket, provider_id
             ORDER BY time_bucket ASC, provider_id ASC"#,
-            fmt = strftime_fmt
-        );
-
-        let rows = sqlx::query(&query_str)
-            .bind(&start_str)
-            .bind(&end_str)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| StorageError::QueryFailed(format!("history query failed: {}", e)))?;
+        )
+        .bind(&start_str)
+        .bind(&end_str)
+        .bind(strftime_fmt)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::QueryFailed(format!("history query failed: {}", e)))?;
 
         let records: Vec<UsageRecord> = rows
             .iter()
@@ -615,9 +613,8 @@ impl StorageLayer {
         }
 
         // Use VACUUM INTO to create a clean copy of the database
-        let dest_str = dest.to_string_lossy().replace('\'', "''");
-        let vacuum_sql = format!("VACUUM INTO '{}'", dest_str);
-        sqlx::raw_sql(&vacuum_sql)
+        sqlx::query("VACUUM INTO ?1")
+            .bind(dest.to_string_lossy().as_ref())
             .execute(&self.pool)
             .await
             .map_err(|e| StorageError::BackupFailed(format!("VACUUM INTO failed: {}", e)))?;
@@ -836,33 +833,41 @@ impl StorageLayer {
             StorageError::RestoreFailed(format!("failed to begin transaction: {}", e))
         })?;
         for table in RESTORED_TABLES {
-            let columns_sql = format!("SELECT name FROM pragma_table_info('{}', 'main')", table);
-            let columns: Vec<String> = (&mut *tx)
-                .fetch_all(columns_sql.as_str())
-                .await
-                .map_err(|e| {
-                    StorageError::RestoreFailed(format!(
-                        "failed to read columns of {}: {}",
-                        table, e
-                    ))
-                })?
+            let columns: Vec<String> =
+                sqlx::query_scalar("SELECT name FROM pragma_table_info(?1, 'main')")
+                    .bind(table)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        StorageError::RestoreFailed(format!(
+                            "failed to read columns of {}: {}",
+                            table, e
+                        ))
+                    })?;
+            let cols = columns
                 .iter()
-                .map(|r| r.try_get::<String, _>(0).unwrap_or_default())
-                .collect();
-            let cols = columns.join(", ");
+                .map(|column| format!(r#""{}""#, column.replace('"', r#""""#)))
+                .collect::<Vec<_>>()
+                .join(", ");
 
             let delete_sql = format!("DELETE FROM main.{}", table);
-            (&mut *tx).execute(delete_sql.as_str()).await.map_err(|e| {
-                StorageError::RestoreFailed(format!("failed to clear {}: {}", table, e))
-            })?;
+            sqlx::query(sqlx::AssertSqlSafe(delete_sql))
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    StorageError::RestoreFailed(format!("failed to clear {}: {}", table, e))
+                })?;
             let insert_sql = format!(
                 "INSERT INTO main.{t} ({c}) SELECT {c} FROM restore_src.{t}",
                 t = table,
                 c = cols
             );
-            (&mut *tx).execute(insert_sql.as_str()).await.map_err(|e| {
-                StorageError::RestoreFailed(format!("failed to restore {}: {}", table, e))
-            })?;
+            sqlx::query(sqlx::AssertSqlSafe(insert_sql))
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    StorageError::RestoreFailed(format!("failed to restore {}: {}", table, e))
+                })?;
         }
         tx.commit()
             .await

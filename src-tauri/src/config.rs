@@ -76,6 +76,7 @@ impl AppConfig {
             .map_err(|e| ConfigError::InvalidFormat(e.to_string()))?;
 
         config.window.normalize();
+        config.claude.data_dir = claude_data_dir(Some(config.claude.data_dir));
 
         Ok(config)
     }
@@ -132,7 +133,7 @@ pub struct ClaudeConfig {
 impl Default for ClaudeConfig {
     fn default() -> Self {
         Self {
-            data_dir: default_claude_data_dir(),
+            data_dir: claude_data_dir(None),
             enabled: true,
         }
     }
@@ -278,19 +279,98 @@ fn default_db_path() -> PathBuf {
     PathBuf::from("usage.db")
 }
 
-/// Resolve the default Claude Desktop data directory (Windows Store sandboxed path).
-fn default_claude_data_dir() -> PathBuf {
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data)
-            .join("Packages")
-            .join("Claude_pzs8sxrjxfjjc")
-            .join("LocalCache")
-            .join("Roaming")
-            .join("Claude");
+/// Locate Claude's data after a Windows Store layout change.
+fn claude_data_dir(configured: Option<PathBuf>) -> PathBuf {
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    resolve_claude_data_dir(local_app_data.as_deref(), configured)
+}
+
+fn resolve_claude_data_dir(local_app_data: Option<&Path>, configured: Option<PathBuf>) -> PathBuf {
+    let Some(local_app_data) = local_app_data else {
+        return configured.unwrap_or_else(|| PathBuf::from("claude-data"));
+    };
+
+    let legacy = local_app_data
+        .join("Packages")
+        .join("Claude_pzs8sxrjxfjjc")
+        .join("LocalCache")
+        .join("Roaming")
+        .join("Claude");
+
+    // An existing config can store our old default even after Claude moves.
+    // Keep any path the user configured separately, even if currently absent.
+    if let Some(custom) = configured.filter(|path| path != &legacy) {
+        return custom;
     }
 
-    // Fallback
-    PathBuf::from("claude-data")
+    let current = local_app_data
+        .join("Claude-Data")
+        .join("claude_pzs8sxrjxfjjc");
+    if current.join("plan-usage-history.json").is_file()
+        || current.join("buddy-tokens.json").is_file()
+    {
+        current
+    } else {
+        legacy
+    }
+}
+
+#[cfg(test)]
+mod claude_data_dir_tests {
+    use super::*;
+
+    const LEGACY_PATH: &str = "Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude";
+    const CURRENT_PATH: &str = "Claude-Data/claude_pzs8sxrjxfjjc";
+
+    #[test]
+    fn fresh_install_detects_usage_files_in_the_current_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join(CURRENT_PATH);
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("plan-usage-history.json"), b"{}").unwrap();
+
+        assert_eq!(resolve_claude_data_dir(Some(dir.path()), None), current);
+    }
+
+    #[test]
+    fn saved_legacy_default_follows_the_moved_usage_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(LEGACY_PATH);
+        let current = dir.path().join(CURRENT_PATH);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("buddy-tokens.json"), b"{}").unwrap();
+
+        assert_eq!(
+            resolve_claude_data_dir(Some(dir.path()), Some(legacy)),
+            current
+        );
+    }
+
+    #[test]
+    fn empty_current_directory_does_not_displace_the_legacy_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(LEGACY_PATH);
+        std::fs::create_dir_all(dir.path().join(CURRENT_PATH)).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("plan-usage-history.json"), b"{}").unwrap();
+
+        assert_eq!(resolve_claude_data_dir(Some(dir.path()), None), legacy);
+    }
+
+    #[test]
+    fn explicitly_configured_directory_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join(CURRENT_PATH);
+        let custom = dir.path().join("custom-claude-directory");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("plan-usage-history.json"), b"{}").unwrap();
+
+        assert_eq!(
+            resolve_claude_data_dir(Some(dir.path()), Some(custom.clone())),
+            custom
+        );
+    }
 }
 
 /// Get the user home directory with a simple fallback.

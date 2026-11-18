@@ -90,6 +90,39 @@ fn test_each_window_keeps_its_own_observation_time() {
 }
 
 #[test]
+fn test_an_older_session_record_cannot_replace_a_newer_quota_reading() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = adapter_with_lines(
+        dir.path(),
+        &[line(
+            "2026-11-18T17:17:25Z",
+            r#"{"limit_id":"codex","primary":{"used_percent":70.0,"window_minutes":10080},"secondary":null}"#,
+        )],
+    );
+    adapter.collect(None).unwrap();
+
+    let older_session = dir.path().join("2026/07/30/older-session.jsonl");
+    fs::write(
+        &older_session,
+        format!("{}\n", line(
+            "2026-11-18T17:17:18Z",
+            r#"{"limit_id":"codex","primary":{"used_percent":60.0,"window_minutes":10080},"secondary":{"used_percent":40.0,"window_minutes":300}}"#,
+        )),
+    )
+    .unwrap();
+    adapter.collect(None).unwrap();
+
+    let summary = adapter.get_current_summary().unwrap();
+    let quota = summary.quota.unwrap();
+    assert_eq!(quota.standard_pct, Some(70.0));
+    assert_eq!(quota.fast_hours_pct, Some(40.0));
+    assert_eq!(
+        adapter.quota_observed().weekly,
+        Some(at("2026-11-18T17:17:25Z"))
+    );
+}
+
+#[test]
 fn test_a_null_limit_family_does_not_refresh_a_valid_reading() {
     let dir = tempfile::tempdir().unwrap();
     let adapter = adapter_with_lines(

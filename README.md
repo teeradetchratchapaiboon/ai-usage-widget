@@ -4,7 +4,7 @@
 
 โปรแกรมอ่านข้อมูลจากไฟล์ที่แอปทั้งสองเก็บไว้ในเครื่อง ไม่ส่ง prompt หรือข้อความสนทนาออกไป และไม่เรียก AI API เพิ่ม จึงไม่ทำให้เสีย Token เพิ่ม
 
-[![ดาวน์โหลดสำหรับ Windows](https://img.shields.io/badge/ดาวน์โหลดสำหรับ_Windows-v0.1.0-1677ff?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/download/v0.1.0/AI-Usage-Widget_0.1.0_x64-setup.exe)
+[![ดาวน์โหลดสำหรับ Windows](https://img.shields.io/badge/ดาวน์โหลดสำหรับ_Windows-x64-1677ff?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/latest/download/AI-Usage-Widget-Windows-x64-Setup.exe)
 
 [ดูเวอร์ชันล่าสุด](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/latest) · [แจ้งปัญหา](https://github.com/teeradetchratchapaiboon/ai-usage-widget/issues)
 
@@ -14,18 +14,12 @@
 
 รองรับ Windows 10 (64-bit) เวอร์ชัน 1803 ขึ้นไป และ Windows 11
 
-1. ดาวน์โหลด [`AI-Usage-Widget_0.1.0_x64-setup.exe`](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/download/v0.1.0/AI-Usage-Widget_0.1.0_x64-setup.exe)
+1. ดาวน์โหลด [`AI-Usage-Widget-Windows-x64-Setup.exe`](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases/latest/download/AI-Usage-Widget-Windows-x64-Setup.exe)
 2. เปิดไฟล์ที่ดาวน์โหลด แล้วทำตามขั้นตอนในตัวติดตั้ง
 3. เปิด **AI Usage Widget** จาก Start Menu
 4. โปรแกรมจะแสดงวิดเจ็ตและเริ่มอ่านข้อมูลจาก Codex/Claude ในเครื่องโดยอัตโนมัติ
 
 > ดาวน์โหลดจากหน้า [Releases ของ repository นี้](https://github.com/teeradetchratchapaiboon/ai-usage-widget/releases) เท่านั้น ตัวโปรแกรมสำหรับผู้ใช้คือไฟล์ที่ลงท้ายด้วย `-setup.exe` ส่วน `Source code` ที่ GitHub แสดงให้อัตโนมัติมีไว้สำหรับนักพัฒนา
-
-ไฟล์ติดตั้ง `v0.1.0` ที่เผยแพร่บน GitHub มี SHA-256:
-
-```text
-e79b92062fbcc3184c21f286f306abaeac033af7f82c326a693911617209a079
-```
 
 Windows 11 มี Microsoft Edge WebView2 Runtime มาให้แล้ว หาก Windows 10 เปิดโปรแกรมไม่ได้ ให้ติดตั้ง [WebView2 Runtime จาก Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/)
 
@@ -141,14 +135,14 @@ AI Usage Widget อ่านค่าที่ Codex/Claude เพิ่งเ�
 ### ไม่พบข้อมูล Claude
 
 - เปิด Claude Desktop และใช้งานอย่างน้อยหนึ่งครั้ง
-- รุ่นปัจจุบันรองรับตำแหน่งข้อมูลของ Claude ที่ติดตั้งจาก Microsoft Store
+- Widget ตรวจหาไฟล์ Usage จากทั้งตำแหน่งเดิมของ Claude ใน Microsoft Store และโฟลเดอร์ `%LOCALAPPDATA%\Claude-Data`
 - หากติดตั้ง Claude ด้วยวิธีอื่น ตำแหน่งข้อมูลอาจต่างออกไปและยังต้องตั้งค่าเพิ่มเติม
 
 ### อัปเดตอัตโนมัติ
 
 ตั้งแต่เวอร์ชัน 0.2.0 เมื่อมีเวอร์ชันใหม่ Dashboard จะแสดงแถบแจ้งเตือนพร้อมปุ่ม **อัปเดตทันที** โปรแกรมจะดาวน์โหลด ตรวจลายเซ็นของไฟล์ติดตั้ง ติดตั้ง แล้วเปิดตัวเองใหม่ หากอัปเดตอัตโนมัติไม่สำเร็จ ให้กดปุ่ม **หน้าดาวน์โหลด** เพื่อดาวน์โหลดไฟล์ติดตั้งจากหน้า Release แทน
 
-ผู้ที่ใช้เวอร์ชัน 0.1.0 ต้องติดตั้ง 0.2.0 ด้วยตนเองหนึ่งครั้งก่อน เพราะ 0.1.0 ยังไม่มีระบบอัปเดตอัตโนมัติ
+ผู้ที่ใช้เวอร์ชัน 0.1.0 ต้องติดตั้งเวอร์ชันล่าสุดจากหน้า Releases ด้วยตนเองหนึ่งครั้งก่อน เพราะ 0.1.0 ยังไม่มีระบบอัปเดตอัตโนมัติ
 
 ### เปิดแล้วไม่เห็นวิดเจ็ตหรือคลิกไม่ได้
 
@@ -172,7 +166,7 @@ AI Usage Widget อ่านค่าที่ Codex/Claude เพิ่งเ�
 ### Prerequisites
 
 - Node.js 22
-- Rust stable
+- Rust stable (1.94+)
 - Visual Studio Build Tools 2022 พร้อม Desktop development with C++
 - Microsoft Edge WebView2 Runtime
 

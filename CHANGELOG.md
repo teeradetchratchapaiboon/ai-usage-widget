@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-11-19
+
+### Security
+
+- Update bundled SQLite to address RUSTSEC-2026-0459. Update the SQLite
+  dependencies and remove unused SQLx database drivers from the lockfile.
+- Apply compatible security updates to Tokio, rustix and frontend tooling.
+
+### Fixed
+
+- Detect Claude Desktop usage files in the current Windows data directory
+  when the app still has its legacy default path.
+- Keep the newest Codex quota reading when older sessions are processed later.
+- Point the README download link at the latest published Windows installer.
+
 ## [0.2.1] - 2026-11-01
 
 ### Fixed
